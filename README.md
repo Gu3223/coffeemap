@@ -56,13 +56,19 @@ npm run preview
 
 ## 高德 Key 配置
 
-在项目根目录创建 `.env`，内容如下：
+高德 Key 现在**只存在服务端**：它保存在云函数 `amap-nearby` 的环境变量 `AMAP_KEY` 里，不再下发到浏览器。前端只拿到一个代理地址，所以打开 F12 也抄不到 Key。
+
+本地 `.env` 里仍保留 `VITE_AMAP_KEY`，有两个用途：
 
 ```env
 VITE_AMAP_KEY=你的高德Web服务Key
+VITE_AMAP_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/nearby
 ```
 
-`.env` 已被 Git 忽略，真实 Key 不应写进 GitHub。高德 Key 需要开通 Web 服务相关权限，并配置正确的安全域名或服务端访问策略。
+- 部署云函数时，`cloudbaserc.json` 通过 `{{env.VITE_AMAP_KEY}}` 把它注入函数环境变量（文件里不写明文，因为它会被提交进 Git）；
+- 想把前端临时切回「直连高德」的老模式，注释掉 `VITE_AMAP_PROXY` 那一行即可。
+
+`.env` 已被 Git 忽略，真实 Key 不应写进 GitHub。云函数、网关域名、限流与回滚的完整说明见 [`functions/amap-nearby/README.md`](./functions/amap-nearby/README.md)。
 
 ## CloudBase 部署
 
@@ -72,10 +78,11 @@ VITE_AMAP_KEY=你的高德Web服务Key
 | --- | --- |
 | 环境 ID | `coffeemap-prod-d7gyys53d1a4cee03` |
 | 应用服务名 | `coffeemap` |
-| 当前线上版本 | `coffeemap-004` |
+| 当前线上版本 | `coffeemap-006` |
 | 构建命令 | `npm run build` |
 | 输出目录 | `dist` |
-| 构建环境变量 | `VITE_AMAP_KEY` |
+| 构建环境变量 | `VITE_AMAP_PROXY`（高德 Key 已移到云函数，不再进前端包） |
+| 云函数 | `amap-nearby`，网关路由 `/api/nearby` |
 
 首次使用时登录并切换环境：
 
@@ -90,7 +97,13 @@ tcb env use coffeemap-prod-d7gyys53d1a4cee03
 npm run deploy:cloudbase
 ```
 
-部署配置位于 [`cloudbaserc.json`](./cloudbaserc.json)。它会从 CloudBase 构建环境变量中读取 `VITE_AMAP_KEY`，不会上传本地 `.env` 文件。
+改动了 `functions/` 之后，还要部署云函数（会自动创建/更新网关路由）：
+
+```bash
+npm run deploy:fn
+```
+
+部署配置位于 [`cloudbaserc.json`](./cloudbaserc.json)：`app` 段声明 Web 应用的构建环境变量，`functions` 段声明云函数 `amap-nearby`（Key 以 `{{env.VITE_AMAP_KEY}}` 引用，不写明文）。它不会上传本地 `.env` 文件。
 
 ## GitHub 同步
 
@@ -116,6 +129,9 @@ git show 提交号
 - `39960af`：增加 CloudBase 部署配置
 - `efa6b3f`：清理旧 Git 元数据和过期入口文件
 - `9881d94`：优化精确定位和附近地点搜索
+- `91e119a`：附近搜索改为按 POI 分类检索 + 环形分片（2 公里召回 191 → 369 家）
+- `4f628a6`：新增服务端代理云函数（`functions/amap-nearby`）
+- `d29560e`：前端切到代理模式，高德 Key 移出浏览器
 
 ## 新对话继续开发
 
