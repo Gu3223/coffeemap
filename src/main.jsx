@@ -163,7 +163,7 @@ function MapView({ visibleCafes, selected, onSelect, location, accuracy, onLocat
 function App() {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('全部')
-  const [sort, setSort] = useState('推荐排序')
+  const [sort, setSort] = useState('评分优先')
   const [selected, setSelected] = useState(null)
   const [detailCafe, setDetailCafe] = useState(null)
   const [favorites, setFavorites] = useState([])
@@ -226,7 +226,7 @@ function App() {
   const filters = ['全部','营业中','4.5+ 评分','手冲咖啡','奶咖']
   const visible = useMemo(() => {
     let list = cafes.filter(cafe => (!query || `${cafe.name}${cafe.address}${cafe.category}`.toLowerCase().includes(query.toLowerCase())) && (filter === '全部' || (filter === '营业中' ? cafe.open === true : filter === '4.5+ 评分' ? cafe.rating != null && cafe.rating >= 4.5 : cafe.category === filter)))
-    return [...list].sort((a, b) => sort === '距离优先' ? a.distanceKm - b.distanceKm : sort === '评分优先' ? (b.rating ?? -1) - (a.rating ?? -1) : 0)
+    return [...list].sort((a, b) => sort === '距离优先' ? a.distanceKm - b.distanceKm : sort === '评分优先' ? ((b.rating ?? -1) - (a.rating ?? -1)) || (a.distanceKm - b.distanceKm) : 0)
   }, [cafes, query, filter, sort])
   const toggleFavorite = id => setFavorites(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
   const locationLabel = locationStatus === 'requesting' ? '正在获取位置…' : isFollowing ? '实时跟随中' : locationStatus === 'ready' ? '我的位置' : location.label
