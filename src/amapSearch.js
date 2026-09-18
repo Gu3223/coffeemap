@@ -76,19 +76,20 @@ function scheduleRequest(task) {
 const RATE_LIMIT_INFOCODES = new Set(['10019', '10020', '10021', '10004'])
 const isRateLimitError = error => RATE_LIMIT_INFOCODES.has(String(error?.infocode)) || /QPS|ACCESS_TOO_FREQUENT/i.test(error?.message || '')
 
-// 走代理时请求里不带 key（Key 只存在于云函数环境变量），直连时才带。
-function buildRequestUrl(params) {
+// 代理模式下前端只报「分类 + 位置 + 半径 + 页码」四个值：types/keywords 由云函数映射，
+// 排序、每页条数、返回字段也都在服务端固定。这样端点被他人拿到也只能查咖啡店和按摩店，
+// 无法当作免费的高德通用接口使用。直连模式则照旧把完整参数发给高德。
+function buildRequestUrl(params, category) {
   if (!AMAP_PROXY_URL) return `${AMAP_ENDPOINT}?${new URLSearchParams(params)}`
-  const safeParams = { ...params }
-  delete safeParams.key
-  return `${AMAP_PROXY_URL}?${new URLSearchParams(safeParams)}`
+  const proxyParams = { category, location: params.location, radius: params.radius, page_num: params.page_num }
+  return `${AMAP_PROXY_URL}?${new URLSearchParams(proxyParams)}`
 }
 
-async function requestPage(params, signal) {
+async function requestPage(params, category, signal) {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await scheduleRequest(async () => {
-        const response = await fetch(buildRequestUrl(params), { signal })
+        const response = await fetch(buildRequestUrl(params, category), { signal })
         if (!response.ok) {
           const error = new Error(AMAP_PROXY_URL ? 'PROXY_UNAVAILABLE' : `Amap HTTP ${response.status}`)
           if (AMAP_PROXY_URL) error.code = 'PROXY_UNAVAILABLE'
@@ -228,7 +229,7 @@ async function fetchCell(center, radiusMeters, category, config, signal, budget,
 
     let data
     try {
-      data = await requestPage(params, signal)
+      data = await requestPage(params, category, signal)
     } catch (error) {
       if (error.name === 'AbortError' || !pois.length) throw error
       break
