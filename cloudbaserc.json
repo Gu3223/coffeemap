@@ -10,7 +10,17 @@
     "outputDir": "dist",
     "deployPath": "/",
     "envVariables": {
-      "VITE_AMAP_KEY": "{{env.VITE_AMAP_KEY}}"
+      "VITE_AMAP_PROXY": "https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/nearby"
     }
-  }
+  },
+  "functions": [
+    {
+      "name": "amap-nearby",
+      "description": "高德周边搜索服务端代理，Key 只存函数环境变量",
+      "timeout": 20,
+      "envVariables": {
+        "AMAP_KEY": "{{env.VITE_AMAP_KEY}}"
+      }
+    }
+  ]
 }

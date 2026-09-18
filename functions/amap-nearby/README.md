@@ -13,12 +13,12 @@
 
 ```bash
 tcb fn deploy amap-nearby -e coffeemap-prod-d7gyys53d1a4cee03 \
-  --dir functions/amap-nearby --httpFn --path /api/nearby \
+  --dir functions/amap-nearby --path /api/nearby \
   --runtime Nodejs20.19 --force
 ```
 
-- `--httpFn` **必须加**：不加默认是 Event 类型，无法通过 URL 访问。
-- `--path /api/nearby` 会自动创建 HTTP 访问路径，不必再单独执行 `tcb routes add`。
+- **不要加 `--httpFn`**。那个开关是「Web 函数」模式，要求目录里有 `scf_bootstrap` 启动文件（即自己起 HTTP 服务器的模型），与本目录 `index.js` 的 `exports.main(event)` 写法不兼容——加了它 CLI 会卡在「自动创建 scf_bootstrap 示例？」的交互提示上，且函数不会被创建。本函数走的是**事件函数 + HTTP 访问服务（网关）路由**：网关负责把 HTTP 请求转成 `event`，返回值含 `statusCode` 时自动按「集成响应」处理。
+- `--path /api/nearby` 会自动创建网关路由（等价于 `tcb routes add`），无需单独执行。
 - 入口必须是 `index.js` 且为 CommonJS（官方明确不支持直接用 ES Module）；本目录的 `package.json` 刻意不写 `"type": "module"`，以保证这一点。
 
 ## 配置 Key（服务端）
@@ -27,23 +27,30 @@ tcb fn deploy amap-nearby -e coffeemap-prod-d7gyys53d1a4cee03 \
 
 没有配置时函数返回 `500 PROXY_MISSING_KEY`，**不会**把请求打到高德。
 
-## 网关域名（实测，非文档）
+## 网关域名（实测，踩过坑，以此为准）
 
-| 形式 | 实测结果 |
-|---|---|
-| `https://coffeemap-prod-d7gyys53d1a4cee03.service.tcloudbase.com/` | **可用**：返回 `INVALID_PATH`，说明网关在线、只是当前没有匹配路由 |
-| `https://coffeemap-prod-d7gyys53d1a4cee03.ap-shanghai.app.tcloudbase.com/` | `INVALID_ENV` |
-| `https://coffeemap-prod-d7gyys53d1a4cee03.app.tcloudbase.com/` | DNS 解析失败 |
-
-官方文档现在推荐 `<envId>.<region>.app.tcloudbase.com` 形式，但**本环境实际生效的是旧版 `service.tcloudbase.com` 形式**，以实测为准。所以函数地址是：
+本环境真正可用的网关域名是**带 APPID 后缀**的那个：
 
 ```
-https://coffeemap-prod-d7gyys53d1a4cee03.service.tcloudbase.com/api/nearby
+https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/nearby
 ```
 
-## CORS（这一步最容易踩坑）
+用 `tcb domains ls` 可以看到它就是环境绑定的默认域名（`-1491257715` 是腾讯云 APPID）。踩过的两个坑：
 
-HTTP 网关有路由级的「跨域校验」开关，两种状态行为完全不同：
+| 尝试过的形式 | 实测结果 | 为什么会误判 |
+|---|---|---|
+| `<envId>-<APPID>.ap-shanghai.app.tcloudbase.com` | **可用**（正确的那个） | — |
+| `<envId>.service.tcloudbase.com` | `INVALID_PATH` | 网关认识这个环境，但该域名下没有路由。**看起来像「域名对了只是没配路由」，实际是域名根本不对**，最容易把人带偏 |
+| `<envId>.ap-shanghai.app.tcloudbase.com` | `INVALID_ENV` | 少了 APPID 后缀 |
+| `<envId>.app.tcloudbase.com` | DNS 解析失败 | 少了 region 与 APPID |
+
+**教训**：判断网关域名别只看错误码，要用 `tcb domains ls` 看环境实际绑定的域名。
+
+## CORS（当前状态：无需额外配置）
+
+**实测结论**：路由建好后，用真实前端 Origin（`https://coffeemap-coffeemap-prod-d7gyys53d1a4cee03.webapps.tcloudbase.com`）请求该端点，返回 **HTTP 200** 且带 `access-control-allow-origin: *`（该头来自函数自身），**网关没有拦截**。所以本环境不需要额外配置安全域名。
+
+备用知识（若以后有人把路由的「跨域校验」打开）：
 
 - **开启跨域校验**：网关校验请求 Origin 是否在「Web 安全域名」白名单内，自动补 `Access-Control-Allow-Origin`，白名单外直接拦截。官方默认白名单包含 `localhost`、`<envId>.<region>.app.tcloudbase.com` 等，**不包含 `webapps.tcloudbase.com`** —— 而我们的前端正好部署在那里。因此必须把下面这个域名手动加进「Web 安全域名」：
   ```
@@ -67,7 +74,7 @@ VITE_AMAP_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03.service.tcloudbase.com/
 ## 验证
 
 ```bash
-node -e "fetch('https://coffeemap-prod-d7gyys53d1a4cee03.service.tcloudbase.com/api/nearby?location=121.4737,31.2304&radius=500&types=050500&page_num=1&page_size=1').then(r=>r.json()).then(d=>console.log(d.status,(d.pois||[]).length))"
+node -e "fetch('https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/nearby?location=121.4737,31.2304&radius=500&types=050500&page_num=1&page_size=1').then(r=>r.json()).then(d=>console.log(d.status,(d.pois||[]).length))"
 ```
 
 应输出 `1 1`（status=1 且 1 条结果）。再检查线上 bundle 里搜不到那把 Key，即切换完成。
