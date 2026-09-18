@@ -6,20 +6,22 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import './styles.css'
 
-const DEFAULT_LOCATION = { latitude: 39.7486, longitude: -104.992, label: '丹佛市中心' }
-const DEFAULT_RADIUS_METERS = 2000
+const DEFAULT_RADIUS_METERS = 500
 const DEFAULT_CATEGORY = 'cafe'
 const RADIUS_OPTIONS = [{ label: '500m', meters: 500 }, { label: '1km', meters: 1000 }, { label: '2km', meters: 2000 }, { label: '5km', meters: 5000 }]
-const CATEGORY_OPTIONS = [{ id: 'cafe', label: '咖啡', icon: '☕' }, { id: 'internet_cafe', label: '网吧', icon: '◈' }, { id: 'massage', label: '按摩', icon: '✦' }]
+const CATEGORY_OPTIONS = [{ id: 'cafe', label: '咖啡', icon: '☕' }, { id: 'massage', label: '按摩', icon: '✦' }]
 const AMAP_ENDPOINT = 'https://restapi.amap.com/v5/place/around'
 const AMAP_KEY = import.meta.env.VITE_AMAP_KEY || ''
-const AMAP_KEYWORDS = { cafe: ['咖啡', '咖啡馆', '咖啡厅', 'coffee'], internet_cafe: ['网吧', '网咖', '电竞馆'], massage: ['按摩', '推拿', '足疗', 'SPA'] }
+const AMAP_SEARCH_CONFIG = {
+  cafe: { keywords: ['咖啡', '咖啡馆', '咖啡厅', '咖啡店', '咖啡屋', '精品咖啡', '手冲咖啡', 'coffee', 'cafe'], maxPages: 8 },
+  massage: { keywords: ['按摩', '推拿', '足疗', 'SPA'], maxPages: 4 }
+}
 const AMAP_PAGE_SIZE = 25
-const AMAP_KEYWORD_LIMIT = 2
-const AMAP_MAX_PAGES = 2
 const AMAP_REQUEST_DELAY_MS = 350
 const AMAP_CACHE_TTL_MS = 5 * 60 * 1000
 const MAX_RESULTS = 200
+const LOCATION_REFRESH_DISTANCE_KM = 0.15
+const LOCATION_ACCURACY_WARNING_METERS = 120
 const amapCache = new Map()
 
 function haversineKm(a, b) {
@@ -36,7 +38,7 @@ function parseOpenStatus(value) { return value && /24\/7/i.test(value) ? true : 
 function priceInfo(value, category) {
   const numeric = Number(value)
   if (!Number.isFinite(numeric) || numeric <= 0) return { priceValue: null, priceLabel: null, priceLevel: '未知' }
-  const suffix = category === 'internet_cafe' ? '/小时' : category === 'massage' ? '起' : ''
+  const suffix = category === 'massage' ? '起' : ''
   return { priceValue: numeric, priceLabel: `¥${numeric}${suffix}`, priceLevel: numeric < 50 ? '¥' : numeric < 150 ? '¥¥' : '¥¥¥' }
 }
 
@@ -62,7 +64,10 @@ function normalizeAmapPoi(poi, origin, index, category) {
   const photos = (poi.photos || []).map(photo => photo.url).filter(Boolean)
   const pricing = priceInfo(business.cost || poi.cost, category)
   const study = classifyStudySuitability(poi, category); const massage = classifyMassageProfile(poi, category)
-  return { id: `amap-${poi.id}`, amapPoiId: poi.id, name: poi.name || '未命名地点', address: poi.address || poi.pname || '地址未标注', category: category === 'internet_cafe' ? '网吧' : category === 'massage' ? '按摩店' : poi.type?.split(';').pop() || '咖啡店', rating: Number.isFinite(rating) && rating > 0 ? rating : null, reviews: Number(business.rating_num || business.review_num) || null, distanceKm: Number(poi.distance || haversineKm([origin.latitude, origin.longitude], [latitude, longitude]) * 1000) / 1000, open: null, openingHours: business.opentime_week || business.opentime || null, ...pricing, studySuitability: study.label, studyReason: study.reason, massageProfile: massage.label, massageReason: massage.reason, tags: [business.tag || null].filter(Boolean), image: photos[0] || null, photos, position: [latitude, longitude], color: colorFor(index), source: 'amap', tel: poi.tel || null }
+  const amapPoiId = poi.id || `${poi.name || 'poi'}-${poi.location || `${longitude},${latitude}`}`
+  const rawDistanceMeters = Number(poi.distance)
+  const distanceKm = Number.isFinite(rawDistanceMeters) ? rawDistanceMeters / 1000 : haversineKm([origin.latitude, origin.longitude], [latitude, longitude])
+  return { id: `amap-${amapPoiId}`, amapPoiId, name: poi.name || '未命名地点', address: poi.address || poi.pname || '地址未标注', category: category === 'massage' ? '按摩店' : poi.type?.split(';').pop() || '咖啡店', rating: Number.isFinite(rating) && rating > 0 ? rating : null, reviews: Number(business.rating_num || business.review_num) || null, distanceKm, open: null, openingHours: business.opentime_week || business.opentime || null, ...pricing, studySuitability: study.label, studyReason: study.reason, massageProfile: massage.label, massageReason: massage.reason, tags: [business.tag || null].filter(Boolean), image: photos[0] || null, photos, position: [latitude, longitude], color: colorFor(index), source: 'amap', tel: poi.tel || null }
 }
 
 function wait(ms, signal) {
@@ -75,49 +80,44 @@ function wait(ms, signal) {
   })
 }
 
-async function fetchAmapKeyword(location, signal, radiusMeters, category, keyword) {
+async function fetchAmapCategory(location, signal, radiusMeters, category) {
+  const config = AMAP_SEARCH_CONFIG[category]
+  if (!config) throw new Error('UNSUPPORTED_CATEGORY')
   const pages = []
-  for (let page = 1; page <= AMAP_MAX_PAGES && pages.length < MAX_RESULTS; page += 1) {
+  for (let page = 1; page <= config.maxPages && pages.length < MAX_RESULTS; page += 1) {
     if (page > 1) await wait(AMAP_REQUEST_DELAY_MS, signal)
-    const params = new URLSearchParams({ key: AMAP_KEY, location: `${location.longitude},${location.latitude}`, radius: String(radiusMeters), keywords: keyword, sortrule: 'distance', page_num: String(page), page_size: String(AMAP_PAGE_SIZE), show_fields: 'business,photos' })
-    const response = await fetch(`${AMAP_ENDPOINT}?${params}`, { signal })
-    if (!response.ok) throw new Error(`Amap HTTP ${response.status}`)
-    const data = await response.json(); if (data.status !== '1') throw new Error(data.info || 'Amap request failed')
-    const results = data.pois || []; pages.push(...results)
-    if (results.length < AMAP_PAGE_SIZE) break
+    try {
+      const params = new URLSearchParams({ key: AMAP_KEY, location: `${location.longitude.toFixed(6)},${location.latitude.toFixed(6)}`, radius: String(radiusMeters), keywords: config.keywords.join('|'), sortrule: 'distance', page_num: String(page), page_size: String(AMAP_PAGE_SIZE), show_fields: 'business,photos' })
+      const response = await fetch(`${AMAP_ENDPOINT}?${params}`, { signal })
+      if (!response.ok) throw new Error(`Amap HTTP ${response.status}`)
+      const data = await response.json(); if (data.status !== '1') throw new Error(data.info || 'Amap request failed')
+      const results = data.pois || []; pages.push(...results)
+      const total = Number(data.count || data.total || 0)
+      if (results.length < AMAP_PAGE_SIZE || (total > 0 && pages.length >= Math.min(total, MAX_RESULTS))) break
+    } catch (error) {
+      if (error.name === 'AbortError' || !pages.length) throw error
+      break
+    }
   }
   return pages
 }
 
 async function fetchAmapCafes(location, signal, radiusMeters, category) {
   if (!AMAP_KEY) throw new Error('MISSING_AMAP_KEY')
-  const cacheKey = `${location.latitude.toFixed(3)},${location.longitude.toFixed(3)}:${radiusMeters}:${category}`
+  const cacheKey = `${location.latitude.toFixed(5)},${location.longitude.toFixed(5)}:${radiusMeters}:${category}`
   const cached = amapCache.get(cacheKey)
   if (cached && Date.now() - cached.timestamp < AMAP_CACHE_TTL_MS) return cached.places
 
-  const keywordResults = []
-  let lastError = null
-  const keywords = AMAP_KEYWORDS[category].slice(0, AMAP_KEYWORD_LIMIT)
-  for (const [index, keyword] of keywords.entries()) {
-    if (index > 0) await wait(AMAP_REQUEST_DELAY_MS, signal)
-    try {
-      keywordResults.push(await fetchAmapKeyword(location, signal, radiusMeters, category, keyword))
-    } catch (error) {
-      if (error.name === 'AbortError') throw error
-      lastError = error
-    }
-  }
-  if (!keywordResults.length && lastError) throw lastError
-
   const seen = new Map(); let index = 0
-  for (const poi of keywordResults.flat()) {
+  const results = await fetchAmapCategory(location, signal, radiusMeters, category)
+  for (const poi of results) {
     const normalized = normalizeAmapPoi(poi, location, index, category); index += 1
     if (!normalized) continue
     const duplicate = seen.get(normalized.amapPoiId) || [...seen.values()].find(place => place.name.toLowerCase() === normalized.name.toLowerCase() && haversineKm(place.position, normalized.position) < .05)
     if (!duplicate) seen.set(normalized.amapPoiId, normalized)
     else if ((!duplicate.rating && normalized.rating) || (!duplicate.image && normalized.image)) seen.set(duplicate.amapPoiId, { ...duplicate, ...normalized, id: duplicate.id, amapPoiId: duplicate.amapPoiId })
   }
-  const places = [...seen.values()].slice(0, MAX_RESULTS).sort((a, b) => ((b.rating ?? -1) - (a.rating ?? -1)) || a.distanceKm - b.distanceKm)
+  const places = [...seen.values()].slice(0, MAX_RESULTS).sort((a, b) => a.distanceKm - b.distanceKm || ((b.rating ?? -1) - (a.rating ?? -1)))
   amapCache.set(cacheKey, { timestamp: Date.now(), places })
   return places
 }
@@ -150,34 +150,43 @@ function Recenter({ center, onLocate }) { const map = useMap(); useEffect(() => 
 function markerIcon(place, active) { return L.divIcon({ className: 'custom-marker-wrap', html: `<div class="custom-marker ${active ? 'active' : ''}" style="--marker:${place.color}"><span>${place.rating == null ? '•' : place.rating}</span></div>`, iconSize: [active ? 48 : 39, active ? 48 : 39], iconAnchor: [active ? 24 : 19, active ? 46 : 37], popupAnchor: [0, -38] }) }
 
 function MapView({ places, selected, onSelect, location, accuracy, onLocate }) {
-  const center = useMemo(() => [location.latitude, location.longitude], [location.latitude, location.longitude])
+  const center = location ? [location.latitude, location.longitude] : [0, 0]
+  if (!location) return <div className="map-wrap real-map map-placeholder"><div><LocateFixed size={28}/><strong>开启定位后显示附近地图</strong><span>未获取真实位置，不会请求其他区域</span><button onClick={onLocate}>使用当前位置</button></div></div>
   return <div className="map-wrap real-map"><MapContainer center={center} zoom={14} zoomControl={false} scrollWheelZoom className="leaflet-map"><TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/><ZoomControl position="topright"/><Recenter center={center} onLocate={onLocate}/><Circle center={center} radius={accuracy || 40} pathOptions={{ color: '#5d90a4', fillColor: '#8bb6c5', fillOpacity: .12, weight: 1 }}/><Marker position={center} icon={L.divIcon({ className: 'user-location-wrap', html: '<div class="user-location-dot"></div>', iconSize: [18,18], iconAnchor: [9,9] })}/>{places.map(place => <Marker key={place.id} position={place.position} icon={markerIcon(place, selected === place.id)} eventHandlers={{ click: () => onSelect(place.id) }}><Popup><strong>{place.name}</strong><br/><span>{place.rating == null ? '暂无评分' : `★ ${place.rating}`} · {place.distanceKm.toFixed(1)} km</span><br/><a className="popup-nav" href={buildAmapNavigationUrl(place)} target="_blank" rel="noreferrer">打开高德导航 →</a></Popup></Marker>)}</MapContainer><div className="map-caption"><MapPin size={15}/> {location.label || '当前位置'} <span>·</span> {places.length} places nearby</div></div>
 }
 
 function App() {
-  const [query, setQuery] = useState(''); const [filter, setFilter] = useState('全部'); const [sort, setSort] = useState('评分优先'); const [radiusMeters, setRadiusMeters] = useState(DEFAULT_RADIUS_METERS); const [placeCategory, setPlaceCategory] = useState(DEFAULT_CATEGORY)
-  const [selected, setSelected] = useState(null); const [detailPlace, setDetailPlace] = useState(null); const [favorites, setFavorites] = useState([]); const [location, setLocation] = useState(DEFAULT_LOCATION); const [locationStatus, setLocationStatus] = useState('idle'); const [isFollowing, setIsFollowing] = useState(false); const [places, setPlaces] = useState([]); const [placesStatus, setPlacesStatus] = useState('idle'); const [placesError, setPlacesError] = useState('')
+  const [query, setQuery] = useState(''); const [filter, setFilter] = useState('全部'); const [sort, setSort] = useState('距离优先'); const [radiusMeters, setRadiusMeters] = useState(DEFAULT_RADIUS_METERS); const [placeCategory, setPlaceCategory] = useState(DEFAULT_CATEGORY)
+  const [selected, setSelected] = useState(null); const [detailPlace, setDetailPlace] = useState(null); const [favorites, setFavorites] = useState([]); const [location, setLocation] = useState(null); const [locationStatus, setLocationStatus] = useState('idle'); const [isFollowing, setIsFollowing] = useState(false); const [places, setPlaces] = useState([]); const [placesStatus, setPlacesStatus] = useState('location-required'); const [placesError, setPlacesError] = useState('')
   const watchId = useRef(null); const lastSearch = useRef(null); const abortRef = useRef(null); const placesRef = useRef([]); const radiusRef = useRef(DEFAULT_RADIUS_METERS); const categoryRef = useRef(DEFAULT_CATEGORY)
   radiusRef.current = radiusMeters; categoryRef.current = placeCategory
 
   const loadPlaces = useCallback(async (nextLocation, requestedRadius = radiusRef.current, requestedCategory = categoryRef.current) => {
+    if (!nextLocation) return
     abortRef.current?.abort(); const controller = new AbortController(); abortRef.current = controller; setPlacesStatus('loading'); setPlacesError('')
     try { const result = await fetchNearbyPlaces(nextLocation, controller.signal, requestedRadius, requestedCategory); placesRef.current = result; setPlaces(result); setSelected(current => result.some(place => place.id === current) ? current : result[0]?.id || null); lastSearch.current = [nextLocation.latitude, nextLocation.longitude]; setPlacesStatus(result.length ? 'ready' : 'empty') } catch (error) { if (error.name === 'AbortError') return; setPlacesError(error.message === 'MISSING_AMAP_KEY' ? '未配置高德 Web 服务 Key，无法加载地点。' : '高德地点暂时无法更新，请稍后重试。'); setPlacesStatus(error.message === 'MISSING_AMAP_KEY' ? 'missing-key' : 'error'); placesRef.current = []; setPlaces([]) }
   }, [])
 
-  const applyPosition = useCallback(position => { const next = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy, label: '我的实时位置' }; setLocation(next); setLocationStatus('ready'); const previous = lastSearch.current; if (!previous || haversineKm(previous, [next.latitude, next.longitude]) >= .5) loadPlaces(next, radiusRef.current, categoryRef.current) }, [loadPlaces])
-  const requestLocation = useCallback(() => { const fallback = () => { setLocation(DEFAULT_LOCATION); loadPlaces(DEFAULT_LOCATION) }; if (!navigator.geolocation) { setLocationStatus('error'); setPlacesError('当前浏览器不支持定位，正在显示默认区域。'); fallback(); return }; setLocationStatus('requesting'); navigator.geolocation.getCurrentPosition(applyPosition, () => { setLocationStatus('denied'); setPlacesError('无法获取当前位置，当前显示默认区域。'); fallback() }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }) }, [applyPosition, loadPlaces])
-  const toggleFollowing = () => { if (isFollowing) { if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current); watchId.current = null; setIsFollowing(false); return } if (!navigator.geolocation) { setLocationStatus('error'); setPlacesError('当前浏览器不支持实时定位。'); return } setIsFollowing(true); setLocationStatus('requesting'); watchId.current = navigator.geolocation.watchPosition(applyPosition, () => { setLocationStatus('denied'); setIsFollowing(false); setPlacesError('实时定位不可用，当前仍显示默认区域。') }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }) }
+  const clearLocationData = useCallback(message => { abortRef.current?.abort(); lastSearch.current = null; placesRef.current = []; setLocation(null); setSelected(null); setPlaces([]); setPlacesStatus('location-required'); setLocationStatus('denied'); setPlacesError(message) }, [])
+  const applyPosition = useCallback(position => { const accuracy = Number.isFinite(position.coords.accuracy) ? position.coords.accuracy : null; const next = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy, label: '我的实时位置' }; setLocation(next); setLocationStatus('ready'); setPlacesError(accuracy && accuracy > LOCATION_ACCURACY_WARNING_METERS ? `当前定位精度约 ${Math.round(accuracy)} 米，结果可能存在少量偏差。` : ''); const previous = lastSearch.current; if (!previous || haversineKm(previous, [next.latitude, next.longitude]) >= LOCATION_REFRESH_DISTANCE_KM) loadPlaces(next, radiusRef.current, categoryRef.current) }, [loadPlaces])
+  const requestLocation = useCallback(() => { if (!navigator.geolocation) { clearLocationData('当前浏览器不支持定位，请使用支持定位的 HTTPS 浏览器。'); return }; abortRef.current?.abort(); lastSearch.current = null; setLocationStatus('requesting'); setPlacesError(''); navigator.geolocation.getCurrentPosition(applyPosition, error => { const message = error.code === 1 ? '请允许浏览器使用当前位置，才能加载附近地点。' : '暂时无法获取当前位置，请重试。'; clearLocationData(message) }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }) }, [applyPosition, clearLocationData])
+  const toggleFollowing = () => { if (isFollowing) { if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current); watchId.current = null; setIsFollowing(false); return } if (!navigator.geolocation) { clearLocationData('当前浏览器不支持实时定位。'); return } setIsFollowing(true); setLocationStatus('requesting'); watchId.current = navigator.geolocation.watchPosition(applyPosition, () => { setLocationStatus('denied'); setIsFollowing(false); setPlacesError(location ? '实时定位暂时中断，当前保留上一次位置结果。' : '无法获取当前位置，请允许定位后重试。') }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 5000 }) }
   useEffect(() => { requestLocation(); return () => { if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current); abortRef.current?.abort() } }, [requestLocation])
 
-  const filters = placeCategory === 'cafe' ? ['全部', '营业中', '4.5+ 评分', '适合学习', '不建议学习', '¥', '¥¥', '¥¥¥'] : placeCategory === 'massage' ? ['全部', '营业中', '信息较完整', '信息较少', '¥', '¥¥', '¥¥¥'] : ['全部', '营业中', '¥', '¥¥', '¥¥¥']
+  const filters = placeCategory === 'cafe' ? ['全部', '营业中', '4.5+ 评分', '适合学习', '不建议学习', '¥', '¥¥', '¥¥¥'] : ['全部', '营业中', '信息较完整', '信息较少', '¥', '¥¥', '¥¥¥']
   const visible = useMemo(() => { const list = places.filter(place => (!query || `${place.name}${place.address}${place.category}`.toLowerCase().includes(query.toLowerCase())) && (filter === '全部' || (filter === '营业中' ? place.open === true : filter === '4.5+ 评分' ? place.rating != null && place.rating >= 4.5 : filter === '适合学习' ? place.studySuitability === '适合学习' : filter === '不建议学习' ? place.studySuitability === '不建议学习' : filter === '信息较完整' ? place.massageProfile === '信息较完整' : filter === '信息较少' ? place.massageProfile === '信息较少' : ['¥', '¥¥', '¥¥¥'].includes(filter) ? place.priceLevel === filter : true))); return [...list].sort((a, b) => sort === '距离优先' ? a.distanceKm - b.distanceKm : sort === '评分优先' ? ((b.rating ?? -1) - (a.rating ?? -1)) || a.distanceKm - b.distanceKm : 0) }, [places, query, filter, sort])
-  const activeCategory = CATEGORY_OPTIONS.find(option => option.id === placeCategory) || CATEGORY_OPTIONS[0]; const locationLabel = locationStatus === 'requesting' ? '正在获取位置…' : isFollowing ? '实时跟随中' : locationStatus === 'ready' ? '我的位置' : location.label; const dataSourceLabel = '高德实时数据'
-  const changeCategory = category => { setPlaceCategory(category); setFilter('全部'); setQuery(''); loadPlaces(location, radiusMeters, category) }; const changeRadius = radius => { setRadiusMeters(radius); loadPlaces(location, radius, placeCategory) }; const toggleFavorite = id => setFavorites(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id]); const openNavigation = place => openCafeNavigation(place)
+  const activeCategory = CATEGORY_OPTIONS.find(option => option.id === placeCategory) || CATEGORY_OPTIONS[0]; const locationLabel = locationStatus === 'requesting' ? '正在获取位置…' : isFollowing ? '实时跟随中' : locationStatus === 'ready' ? '我的位置' : '等待定位'; const dataSourceLabel = location ? '高德实时数据' : '等待真实位置'
+  const locationMessage = location ? `仅查询当前位置 ${radiusMeters >= 1000 ? `${radiusMeters / 1000} km` : `${radiusMeters}m`} 内 · 定位误差约 ${location.accuracy ? `${Math.round(location.accuracy)}m` : '未知'}` : '未获取真实位置，不会请求其他区域'
+  const locationRequired = placesStatus === 'location-required'
+  const retryPlaces = locationRequired ? requestLocation : () => loadPlaces(location)
+  const changeCategory = category => { setPlaceCategory(category); setFilter('全部'); setQuery(''); loadPlaces(location, radiusMeters, category) }
+  const changeRadius = radius => { setRadiusMeters(radius); loadPlaces(location, radius, placeCategory) }
+  const toggleFavorite = id => setFavorites(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])
+  const openNavigation = place => openCafeNavigation(place)
 
-  return <main><header className="header"><a className="brand"><span className="brand-mark">R</span><span>ROAST <i>&</i> ROAM</span></a><nav><a className="active">探索门店</a><a>我的收藏 <sup>{favorites.length || ''}</sup></a></nav><div className="location-actions"><button className="location" onClick={requestLocation}><Navigation size={15}/> {locationLabel} <ChevronDown size={14}/></button><button className={`follow-button ${isFollowing ? 'following' : ''}`} onClick={toggleFollowing}><Radio size={15}/>{isFollowing ? '停止跟随' : '实时跟随'}</button></div><button className="mobile-filter"><SlidersHorizontal size={18}/></button></header>
-    <section className="hero"><div><p className="eyebrow">YOUR NEXT CUP IS CLOSER THAN YOU THINK</p><h1>马上来<br/><em>一杯</em></h1><p className="hero-subtitle">发现此刻，离你最近的好咖啡。</p></div><div className="hero-note"><span className="vertical-line"/><p>打开定位，<br/>让好味道自己出现。</p></div><div className="hero-orbit" aria-hidden="true"><span>NEARBY</span><strong>{radiusMeters / 1000}<br/><small>KM</small></strong></div></section>
-    <section className="workspace"><div className="list-panel"><div className="explore-controls"><div className="category-tabs">{CATEGORY_OPTIONS.map(option => <button key={option.id} className={placeCategory === option.id ? 'active' : ''} onClick={() => changeCategory(option.id)}><span>{option.icon}</span>{option.label}</button>)}</div><div className="radius-tabs"><span>范围</span>{RADIUS_OPTIONS.map(option => <button key={option.meters} className={radiusMeters === option.meters ? 'active' : ''} onClick={() => changeRadius(option.meters)}>{option.label}</button>)}</div></div><div className="location-banner"><div className="location-banner-icon"><LocateFixed size={17}/></div><div><strong>{locationStatus === 'ready' ? `正在探索你附近的${activeCategory.label}` : `发现你附近的${activeCategory.label}`}</strong><span>{locationStatus === 'ready' ? `以 ${locationLabel} 为中心 · ${radiusMeters >= 1000 ? `${radiusMeters / 1000} km` : `${radiusMeters}m`} 范围` : '允许定位后，结果会更贴近你'}</span></div><button onClick={requestLocation}>{locationStatus === 'ready' ? '更新位置' : '使用当前位置'}</button></div><div className="search"><Search size={18}/><input value={query} onChange={event => setQuery(event.target.value)} placeholder={`搜索${activeCategory.label}名称、街区或关键词...`}/>{query && <button onClick={() => setQuery('')}><X size={16}/></button>}</div><div className="toolbar"><div className="filter-scroll">{filters.map(value => <button key={value} className={filter === value ? 'chosen' : ''} onClick={() => setFilter(value)}>{value}</button>)}</div><button className="sort" onClick={() => setSort(sort === '评分优先' ? '距离优先' : sort === '距离优先' ? '推荐排序' : '评分优先')}><ArrowUpDown size={14}/>{sort}</button></div><div className="result-head"><p><strong>{visible.length}</strong> 家{activeCategory.label}地点</p><span>{placesStatus === 'loading' ? '正在更新…' : placesStatus === 'error' ? '高德请求失败' : placesStatus === 'missing-key' ? '未配置高德 Key' : dataSourceLabel}</span></div>{placesError && <div className="notice error"><AlertCircle size={15}/><span>{placesError}</span><button onClick={() => loadPlaces(location)}><RotateCcw size={14}/></button></div>}<div className="cards">{placesStatus === 'loading' && !places.length ? <div className="empty"><LoaderCircle className="spin" size={25}/><h3>正在寻找附近的{activeCategory.label}</h3><p>正在连接高德实时地点数据。</p></div> : visible.length ? visible.map(place => <CafeCard key={place.id} place={place} selected={selected === place.id} favorite={favorites.includes(place.id)} onSelect={setSelected} onFavorite={toggleFavorite} onNavigate={openNavigation} onDetails={setDetailPlace}/>) : <div className="empty"><Coffee size={25}/><h3>{placesStatus === 'missing-key' ? '需要配置高德 Key' : placesStatus === 'empty' ? '当前范围内没有找到地点' : '高德暂时没有返回结果'}</h3><p>{placesStatus === 'missing-key' ? '请在部署环境中设置 VITE_AMAP_KEY。' : '试试扩大范围、切换分类或重新搜索。'}</p></div>}</div></div><MapView places={visible} selected={selected} onSelect={setSelected} location={location} accuracy={location.accuracy} onLocate={requestLocation}/></section><CafeDetailDrawer place={detailPlace} favorite={detailPlace ? favorites.includes(detailPlace.id) : false} onClose={() => setDetailPlace(null)} onFavorite={toggleFavorite} onNavigate={openNavigation}/>
+  return <main><header className="header"><a className="brand"><span className="brand-mark">寻</span><span>寻一杯</span></a><nav><a className="active">探索门店</a><a>我的收藏 <sup>{favorites.length || ''}</sup></a></nav><div className="location-actions"><button className="location" onClick={requestLocation}><Navigation size={15}/> {locationLabel} <ChevronDown size={14}/></button><button className={`follow-button ${isFollowing ? 'following' : ''}`} onClick={toggleFollowing}><Radio size={15}/>{isFollowing ? '停止跟随' : '实时跟随'}</button></div><button className="mobile-filter"><SlidersHorizontal size={18}/></button></header>
+    <section className="hero"><div><p className="eyebrow">YOUR NEXT CUP IS CLOSER THAN YOU THINK</p><h1>寻一<br/><em>杯</em></h1><p className="hero-subtitle">只在你身边，寻找刚刚好的那一杯。</p></div><div className="hero-note"><span className="vertical-line"/><p>打开定位，<br/>只探索你身边。</p></div><div className="hero-orbit" aria-hidden="true"><span>RADIUS</span><strong>{radiusMeters >= 1000 ? radiusMeters / 1000 : radiusMeters / 1000}<br/><small>{radiusMeters >= 1000 ? 'KM' : 'KM'}</small></strong></div></section>
+    <section className="workspace"><div className="list-panel"><div className="explore-controls"><div className="category-tabs">{CATEGORY_OPTIONS.map(option => <button key={option.id} className={placeCategory === option.id ? 'active' : ''} onClick={() => changeCategory(option.id)}><span>{option.icon}</span>{option.label}</button>)}</div><div className="radius-tabs"><span>范围</span>{RADIUS_OPTIONS.map(option => <button key={option.meters} className={radiusMeters === option.meters ? 'active' : ''} onClick={() => changeRadius(option.meters)}>{option.label}</button>)}</div></div><div className="location-banner"><div className="location-banner-icon"><LocateFixed size={17}/></div><div><strong>{location ? `正在探索你附近的${activeCategory.label}` : locationStatus === 'requesting' ? '正在获取当前位置' : '请先开启位置权限'}</strong><span>{locationMessage}</span></div><button onClick={requestLocation}>{location ? '更新位置' : '使用当前位置'}</button></div><div className="search"><Search size={18}/><input value={query} onChange={event => setQuery(event.target.value)} placeholder={`搜索${activeCategory.label}名称、街区或关键词...`}/>{query && <button onClick={() => setQuery('')}><X size={16}/></button>}</div><div className="toolbar"><div className="filter-scroll">{filters.map(value => <button key={value} className={filter === value ? 'chosen' : ''} onClick={() => setFilter(value)}>{value}</button>)}</div><button className="sort" onClick={() => setSort(sort === '距离优先' ? '评分优先' : '距离优先')}><ArrowUpDown size={14}/>{sort}</button></div><div className="result-head"><p><strong>{visible.length}</strong> 家{activeCategory.label}地点</p><span>{placesStatus === 'loading' ? '正在更新…' : placesStatus === 'error' ? '高德请求失败' : placesStatus === 'missing-key' ? '未配置高德 Key' : dataSourceLabel}</span></div>{placesError && <div className="notice error"><AlertCircle size={15}/><span>{placesError}</span><button onClick={retryPlaces}><RotateCcw size={14}/></button></div>}<div className="cards">{placesStatus === 'loading' && !places.length ? <div className="empty"><LoaderCircle className="spin" size={25}/><h3>正在寻找附近的{activeCategory.label}</h3><p>只请求当前位置附近的数据。</p></div> : visible.length ? visible.map(place => <CafeCard key={place.id} place={place} selected={selected === place.id} favorite={favorites.includes(place.id)} onSelect={setSelected} onFavorite={toggleFavorite} onNavigate={openNavigation} onDetails={setDetailPlace}/>) : <div className="empty"><Coffee size={25}/><h3>{locationRequired ? '请先开启定位' : placesStatus === 'missing-key' ? '需要配置高德 Key' : placesStatus === 'empty' ? `当前 ${radiusMeters >= 1000 ? `${radiusMeters / 1000}km` : `${radiusMeters}m`} 内没有找到地点` : '高德暂时没有返回结果'}</h3><p>{locationRequired ? '允许定位后，只会查询你当前位置附近的地点。' : placesStatus === 'missing-key' ? '请在部署环境中设置 VITE_AMAP_KEY。' : '可以扩大范围后重新搜索。'}</p></div>}</div></div><MapView places={visible} selected={selected} onSelect={setSelected} location={location} accuracy={location?.accuracy} onLocate={requestLocation}/></section><CafeDetailDrawer place={detailPlace} favorite={detailPlace ? favorites.includes(detailPlace.id) : false} onClose={() => setDetailPlace(null)} onFavorite={toggleFavorite} onNavigate={openNavigation}/>
   </main>
 }
 
