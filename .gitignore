@@ -4,3 +4,15 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Stray git-internal files that were accidentally committed to the project root
+# (anchored to root so real paths like dist/index.html stay tracked)
+/HEAD
+/config
+/description
+/index
+/COMMIT_EDITMSG
+
+# npm leftovers
+/.package-lock.json
+/_update-notifier-last-checked
