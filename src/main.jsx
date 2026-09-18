@@ -4,127 +4,15 @@ import { AlertCircle, ArrowUpDown, ChevronDown, Clock3, Coffee, ExternalLink, He
 import { Circle, MapContainer, Marker, Popup, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { fetchNearbyPlaces, haversineKm } from './amapSearch'
 import './styles.css'
 
 const DEFAULT_RADIUS_METERS = 500
 const DEFAULT_CATEGORY = 'cafe'
 const RADIUS_OPTIONS = [{ label: '500m', meters: 500 }, { label: '1km', meters: 1000 }, { label: '2km', meters: 2000 }, { label: '5km', meters: 5000 }]
 const CATEGORY_OPTIONS = [{ id: 'cafe', label: '咖啡', icon: '☕' }, { id: 'massage', label: '按摩', icon: '✦' }]
-const AMAP_ENDPOINT = 'https://restapi.amap.com/v5/place/around'
-const AMAP_KEY = import.meta.env.VITE_AMAP_KEY || ''
-const AMAP_SEARCH_CONFIG = {
-  cafe: { keywords: ['咖啡', '咖啡馆', '咖啡厅', '咖啡店', '咖啡屋', '精品咖啡', '手冲咖啡', 'coffee', 'cafe'], maxPages: 8 },
-  massage: { keywords: ['按摩', '推拿', '足疗', 'SPA'], maxPages: 4 }
-}
-const AMAP_PAGE_SIZE = 25
-const AMAP_REQUEST_DELAY_MS = 350
-const AMAP_CACHE_TTL_MS = 5 * 60 * 1000
-const MAX_RESULTS = 200
 const LOCATION_REFRESH_DISTANCE_KM = 0.15
 const LOCATION_ACCURACY_WARNING_METERS = 120
-const amapCache = new Map()
-
-function haversineKm(a, b) {
-  const radians = value => value * Math.PI / 180
-  const dLat = radians(b[0] - a[0]); const dLng = radians(b[1] - a[1])
-  const latA = radians(a[0]); const latB = radians(b[0])
-  const x = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(latA) * Math.cos(latB)
-  return 6371 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
-}
-
-function colorFor(index) { return ['#c46c42', '#d09b38', '#8d6b55', '#a36b4c', '#70806a'][index % 5] }
-function formatAddress(tags = {}) { return [tags['addr:housenumber'], tags['addr:street']].filter(Boolean).join(' ') || tags['addr:suburb'] || tags['addr:city'] || '地址未标注' }
-function parseOpenStatus(value) { return value && /24\/7/i.test(value) ? true : null }
-function priceInfo(value, category) {
-  const numeric = Number(value)
-  if (!Number.isFinite(numeric) || numeric <= 0) return { priceValue: null, priceLabel: null, priceLevel: '未知' }
-  const suffix = category === 'massage' ? '起' : ''
-  return { priceValue: numeric, priceLabel: `¥${numeric}${suffix}`, priceLevel: numeric < 50 ? '¥' : numeric < 150 ? '¥¥' : '¥¥¥' }
-}
-
-function classifyStudySuitability(poi, category) {
-  if (category !== 'cafe') return { label: null, reason: null }
-  const text = `${poi.name || ''} ${poi.type || ''} ${poi.business?.tag || ''}`.toLowerCase()
-  if (/酒吧|ktv|夜店|live|电竞|club|bar/.test(text)) return { label: '不建议学习', reason: '门店信息显示可能存在较高噪音' }
-  if (/自习|阅读|书店|共享空间|安静|study|reading|workspace|wifi|wi-fi/.test(text)) return { label: '适合学习', reason: '门店信息包含安静、阅读或 Wi-Fi 等特征' }
-  return { label: '未判断', reason: '公开 POI 信息不足以判断环境' }
-}
-
-function classifyMassageProfile(poi, category) {
-  if (category !== 'massage') return { label: null, reason: null }
-  const business = poi.business || {}
-  const complete = Boolean(poi.name && poi.address && (poi.tel || business.opentime || business.opentime_week))
-  return { label: complete ? '信息较完整' : '信息较少', reason: complete ? '名称、地址和联系或营业信息较完整' : '部分地址、联系或营业信息缺失，建议到店前核实' }
-}
-
-function normalizeAmapPoi(poi, origin, index, category) {
-  const [longitude, latitude] = (poi.location || '').split(',').map(Number)
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null
-  const business = poi.business || {}; const rating = Number(poi.rating ?? business.rating)
-  const photos = (poi.photos || []).map(photo => photo.url).filter(Boolean)
-  const pricing = priceInfo(business.cost || poi.cost, category)
-  const study = classifyStudySuitability(poi, category); const massage = classifyMassageProfile(poi, category)
-  const amapPoiId = poi.id || `${poi.name || 'poi'}-${poi.location || `${longitude},${latitude}`}`
-  const rawDistanceMeters = Number(poi.distance)
-  const distanceKm = Number.isFinite(rawDistanceMeters) ? rawDistanceMeters / 1000 : haversineKm([origin.latitude, origin.longitude], [latitude, longitude])
-  return { id: `amap-${amapPoiId}`, amapPoiId, name: poi.name || '未命名地点', address: poi.address || poi.pname || '地址未标注', category: category === 'massage' ? '按摩店' : poi.type?.split(';').pop() || '咖啡店', rating: Number.isFinite(rating) && rating > 0 ? rating : null, reviews: Number(business.rating_num || business.review_num) || null, distanceKm, open: null, openingHours: business.opentime_week || business.opentime || null, ...pricing, studySuitability: study.label, studyReason: study.reason, massageProfile: massage.label, massageReason: massage.reason, tags: [business.tag || null].filter(Boolean), image: photos[0] || null, photos, position: [latitude, longitude], color: colorFor(index), source: 'amap', tel: poi.tel || null }
-}
-
-function wait(ms, signal) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms)
-    signal.addEventListener('abort', () => {
-      clearTimeout(timer)
-      reject(new DOMException('Aborted', 'AbortError'))
-    }, { once: true })
-  })
-}
-
-async function fetchAmapCategory(location, signal, radiusMeters, category) {
-  const config = AMAP_SEARCH_CONFIG[category]
-  if (!config) throw new Error('UNSUPPORTED_CATEGORY')
-  const pages = []
-  for (let page = 1; page <= config.maxPages && pages.length < MAX_RESULTS; page += 1) {
-    if (page > 1) await wait(AMAP_REQUEST_DELAY_MS, signal)
-    try {
-      const params = new URLSearchParams({ key: AMAP_KEY, location: `${location.longitude.toFixed(6)},${location.latitude.toFixed(6)}`, radius: String(radiusMeters), keywords: config.keywords.join('|'), sortrule: 'distance', page_num: String(page), page_size: String(AMAP_PAGE_SIZE), show_fields: 'business,photos' })
-      const response = await fetch(`${AMAP_ENDPOINT}?${params}`, { signal })
-      if (!response.ok) throw new Error(`Amap HTTP ${response.status}`)
-      const data = await response.json(); if (data.status !== '1') throw new Error(data.info || 'Amap request failed')
-      const results = data.pois || []; pages.push(...results)
-      const total = Number(data.count || data.total || 0)
-      if (results.length < AMAP_PAGE_SIZE || (total > 0 && pages.length >= Math.min(total, MAX_RESULTS))) break
-    } catch (error) {
-      if (error.name === 'AbortError' || !pages.length) throw error
-      break
-    }
-  }
-  return pages
-}
-
-async function fetchAmapCafes(location, signal, radiusMeters, category) {
-  if (!AMAP_KEY) throw new Error('MISSING_AMAP_KEY')
-  const cacheKey = `${location.latitude.toFixed(5)},${location.longitude.toFixed(5)}:${radiusMeters}:${category}`
-  const cached = amapCache.get(cacheKey)
-  if (cached && Date.now() - cached.timestamp < AMAP_CACHE_TTL_MS) return cached.places
-
-  const seen = new Map(); let index = 0
-  const results = await fetchAmapCategory(location, signal, radiusMeters, category)
-  for (const poi of results) {
-    const normalized = normalizeAmapPoi(poi, location, index, category); index += 1
-    if (!normalized) continue
-    const duplicate = seen.get(normalized.amapPoiId) || [...seen.values()].find(place => place.name.toLowerCase() === normalized.name.toLowerCase() && haversineKm(place.position, normalized.position) < .05)
-    if (!duplicate) seen.set(normalized.amapPoiId, normalized)
-    else if ((!duplicate.rating && normalized.rating) || (!duplicate.image && normalized.image)) seen.set(duplicate.amapPoiId, { ...duplicate, ...normalized, id: duplicate.id, amapPoiId: duplicate.amapPoiId })
-  }
-  const places = [...seen.values()].slice(0, MAX_RESULTS).sort((a, b) => a.distanceKm - b.distanceKm || ((b.rating ?? -1) - (a.rating ?? -1)))
-  amapCache.set(cacheKey, { timestamp: Date.now(), places })
-  return places
-}
-
-async function fetchNearbyPlaces(location, signal, radiusMeters, category) {
-  return fetchAmapCafes(location, signal, radiusMeters, category)
-}
 
 function buildAmapNavigationUrl(place) { const [latitude, longitude] = place.position; return `https://uri.amap.com/marker?${new URLSearchParams({ position: `${longitude},${latitude}`, name: place.name, src: 'roast-roam', callnative: '1' })}` }
 function buildXiaohongshuSearchUrl(place) { return `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(`${place.name} ${place.category}`)}` }
@@ -164,7 +52,8 @@ function App() {
   const loadPlaces = useCallback(async (nextLocation, requestedRadius = radiusRef.current, requestedCategory = categoryRef.current) => {
     if (!nextLocation) return
     abortRef.current?.abort(); const controller = new AbortController(); abortRef.current = controller; setPlacesStatus('loading'); setPlacesError('')
-    try { const result = await fetchNearbyPlaces(nextLocation, controller.signal, requestedRadius, requestedCategory); placesRef.current = result; setPlaces(result); setSelected(current => result.some(place => place.id === current) ? current : result[0]?.id || null); lastSearch.current = [nextLocation.latitude, nextLocation.longitude]; setPlacesStatus(result.length ? 'ready' : 'empty') } catch (error) { if (error.name === 'AbortError') return; setPlacesError(error.message === 'MISSING_AMAP_KEY' ? '未配置高德 Web 服务 Key，无法加载地点。' : '高德地点暂时无法更新，请稍后重试。'); setPlacesStatus(error.message === 'MISSING_AMAP_KEY' ? 'missing-key' : 'error'); placesRef.current = []; setPlaces([]) }
+    const applyResults = (result, final) => { placesRef.current = result; setPlaces(result); setSelected(current => result.some(place => place.id === current) ? current : result[0]?.id || null); if (final) { lastSearch.current = [nextLocation.latitude, nextLocation.longitude]; setPlacesStatus(result.length ? 'ready' : 'empty') } }
+    try { const result = await fetchNearbyPlaces(nextLocation, controller.signal, requestedRadius, requestedCategory, partial => { if (!controller.signal.aborted) applyResults(partial, false) }); applyResults(result, true) } catch (error) { if (error.name === 'AbortError') return; const quotaExhausted = error.infocode === '10003' || error.infocode === '10044'; setPlacesError(error.message === 'MISSING_AMAP_KEY' ? '未配置高德 Web 服务 Key，无法加载地点。' : quotaExhausted ? '高德调用配额已用尽（日/月额度），暂时无法获取新数据。' : '高德地点暂时无法更新，请稍后重试。'); setPlacesStatus(error.message === 'MISSING_AMAP_KEY' ? 'missing-key' : 'error'); placesRef.current = []; setPlaces([]) }
   }, [])
 
   const clearLocationData = useCallback(message => { abortRef.current?.abort(); lastSearch.current = null; placesRef.current = []; setLocation(null); setSelected(null); setPlaces([]); setPlacesStatus('location-required'); setLocationStatus('denied'); setPlacesError(message) }, [])
