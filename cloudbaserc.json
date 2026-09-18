@@ -1,0 +1,16 @@
+{
+  "version": "2.0",
+  "envId": "coffeemap-prod-d7gyys53d1a4cee03",
+  "app": {
+    "serviceName": "coffeemap",
+    "root": ".",
+    "framework": "vite",
+    "installCommand": "npm ci",
+    "buildCommand": "npm run build",
+    "outputDir": "dist",
+    "deployPath": "/",
+    "envVariables": {
+      "VITE_AMAP_KEY": "{{env.VITE_AMAP_KEY}}"
+    }
+  }
+}
