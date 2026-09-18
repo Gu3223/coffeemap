@@ -11,10 +11,16 @@
  *      所以请求必须全局排队且间隔 ≥360ms，撞限流要退避重试。
  *   5. 环形分片（中心 + 6 片，环心距与片半径都取 0.6R）实测把 R2000 的召回
  *      从 191 提升到 522 家（2.7 倍）；片会越界到 1.2R，靠客户端按真实距离过滤保证精确。
+ *
+ * 两种取数模式（检索逻辑完全相同，只换请求出口）：
+ *   - 直连：只配 VITE_AMAP_KEY，浏览器直接请求高德。Key 会被 Vite 内联进 bundle，任何人可提取。
+ *   - 代理：配 VITE_AMAP_PROXY 指向自己的云函数（functions/amap-nearby），请求改发服务端，
+ *     前端不再持有 Key。必须先部署云函数再打开这个开关。
  */
 
 const AMAP_ENDPOINT = 'https://restapi.amap.com/v5/place/around'
 const AMAP_KEY = import.meta.env.VITE_AMAP_KEY || ''
+const AMAP_PROXY_URL = import.meta.env.VITE_AMAP_PROXY || ''
 const AMAP_PAGE_SIZE = 25
 const AMAP_MAX_PAGE = 8
 const AMAP_REQUEST_INTERVAL_MS = 360
@@ -70,12 +76,24 @@ function scheduleRequest(task) {
 const RATE_LIMIT_INFOCODES = new Set(['10019', '10020', '10021', '10004'])
 const isRateLimitError = error => RATE_LIMIT_INFOCODES.has(String(error?.infocode)) || /QPS|ACCESS_TOO_FREQUENT/i.test(error?.message || '')
 
+// 走代理时请求里不带 key（Key 只存在于云函数环境变量），直连时才带。
+function buildRequestUrl(params) {
+  if (!AMAP_PROXY_URL) return `${AMAP_ENDPOINT}?${new URLSearchParams(params)}`
+  const safeParams = { ...params }
+  delete safeParams.key
+  return `${AMAP_PROXY_URL}?${new URLSearchParams(safeParams)}`
+}
+
 async function requestPage(params, signal) {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await scheduleRequest(async () => {
-        const response = await fetch(`${AMAP_ENDPOINT}?${new URLSearchParams(params)}`, { signal })
-        if (!response.ok) throw new Error(`Amap HTTP ${response.status}`)
+        const response = await fetch(buildRequestUrl(params), { signal })
+        if (!response.ok) {
+          const error = new Error(AMAP_PROXY_URL ? 'PROXY_UNAVAILABLE' : `Amap HTTP ${response.status}`)
+          if (AMAP_PROXY_URL) error.code = 'PROXY_UNAVAILABLE'
+          throw error
+        }
         const data = await response.json()
         if (data.status !== '1') {
           const error = new Error(data.info || 'Amap request failed'); error.infocode = data.infocode; throw error
@@ -83,7 +101,8 @@ async function requestPage(params, signal) {
         return data
       })
     } catch (error) {
-      if (error.name === 'AbortError' || attempt >= AMAP_RETRY_LIMIT || !isRateLimitError(error)) throw error
+      const retryable = isRateLimitError(error) || error.code === 'PROXY_UNAVAILABLE'
+      if (error.name === 'AbortError' || attempt >= AMAP_RETRY_LIMIT || !retryable) throw error
       await sleep(600 * (attempt + 1), signal)
     }
   }
@@ -246,7 +265,7 @@ function ringCenters(center, radiusMeters) {
  * 所以界面可以「先出最近的，再逐步补全」，而不是等全部拉完才显示。
  */
 export async function fetchNearbyPlaces(location, signal, radiusMeters, category, onProgress) {
-  if (!AMAP_KEY) throw new Error('MISSING_AMAP_KEY')
+  if (!AMAP_PROXY_URL && !AMAP_KEY) throw new Error('MISSING_AMAP_KEY')
   const config = CATEGORY_SEARCH[category] || CATEGORY_SEARCH.cafe
   const collector = createCollector(location, radiusMeters, category, MAX_RESULTS)
   const budget = { remaining: REQUEST_BUDGET }

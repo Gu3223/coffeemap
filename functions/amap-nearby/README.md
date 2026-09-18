@@ -1,0 +1,97 @@
+# amap-nearby 云函数
+
+高德周边搜索的**服务端代理**。目的只有一个：把高德 Web 服务 Key 从浏览器里挪走，消除「任何人打开 F12 就能抄走 Key 并盗刷配额」的问题。
+
+前端 `src/amapSearch.js` 支持两种取数模式，检索逻辑（多圆心分片、去重、半径过滤、缓存、限流）完全相同，只换请求出口：
+
+| 模式 | 触发条件 | Key 位置 |
+|---|---|---|
+| 直连（现状） | 只配 `VITE_AMAP_KEY` | 被 Vite 内联进 bundle，公开可提取 |
+| 代理 | 配 `VITE_AMAP_PROXY` | 只在云函数环境变量里，不下发前端 |
+
+## 部署
+
+```bash
+tcb fn deploy amap-nearby -e coffeemap-prod-d7gyys53d1a4cee03 \
+  --dir functions/amap-nearby --httpFn --path /api/nearby \
+  --runtime Nodejs20.19 --force
+```
+
+- `--httpFn` **必须加**：不加默认是 Event 类型，无法通过 URL 访问。
+- `--path /api/nearby` 会自动创建 HTTP 访问路径，不必再单独执行 `tcb routes add`。
+- 入口必须是 `index.js` 且为 CommonJS（官方明确不支持直接用 ES Module）；本目录的 `package.json` 刻意不写 `"type": "module"`，以保证这一点。
+
+## 配置 Key（服务端）
+
+在云函数的**环境变量**里设置 `AMAP_KEY`（代码同时兼容 `VITE_AMAP_KEY`）。控制台路径：云函数 → amap-nearby → 配置 → 环境变量。
+
+没有配置时函数返回 `500 PROXY_MISSING_KEY`，**不会**把请求打到高德。
+
+## 网关域名（实测，非文档）
+
+| 形式 | 实测结果 |
+|---|---|
+| `https://coffeemap-prod-d7gyys53d1a4cee03.service.tcloudbase.com/` | **可用**：返回 `INVALID_PATH`，说明网关在线、只是当前没有匹配路由 |
+| `https://coffeemap-prod-d7gyys53d1a4cee03.ap-shanghai.app.tcloudbase.com/` | `INVALID_ENV` |
+| `https://coffeemap-prod-d7gyys53d1a4cee03.app.tcloudbase.com/` | DNS 解析失败 |
+
+官方文档现在推荐 `<envId>.<region>.app.tcloudbase.com` 形式，但**本环境实际生效的是旧版 `service.tcloudbase.com` 形式**，以实测为准。所以函数地址是：
+
+```
+https://coffeemap-prod-d7gyys53d1a4cee03.service.tcloudbase.com/api/nearby
+```
+
+## CORS（这一步最容易踩坑）
+
+HTTP 网关有路由级的「跨域校验」开关，两种状态行为完全不同：
+
+- **开启跨域校验**：网关校验请求 Origin 是否在「Web 安全域名」白名单内，自动补 `Access-Control-Allow-Origin`，白名单外直接拦截。官方默认白名单包含 `localhost`、`<envId>.<region>.app.tcloudbase.com` 等，**不包含 `webapps.tcloudbase.com`** —— 而我们的前端正好部署在那里。因此必须把下面这个域名手动加进「Web 安全域名」：
+  ```
+  https://coffeemap-coffeemap-prod-d7gyys53d1a4cee03.webapps.tcloudbase.com
+  ```
+  配置位置：控制台「环境配置 / 安全来源」，或 CLI `tcb cors`。
+- **关闭跨域校验**：网关直接转发，函数自己返回的 CORS 头生效。本函数已实现（含 `OPTIONS` 预检返回 204），此时无需额外配置。
+
+两种状态函数都能工作，但**开启校验时忘了加白名单**会表现为浏览器端请求被拦，需要留意。
+
+## 前端启用（顺序很重要）
+
+**先部署函数并验证通过，再打开开关。** 在 CloudBase 构建环境变量里加：
+
+```
+VITE_AMAP_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03.service.tcloudbase.com/api/nearby
+```
+
+确认线上一切正常后，即可从构建环境变量中**移除 `VITE_AMAP_KEY`**，前端 bundle 里就不再含有 Key。
+
+## 验证
+
+```bash
+node -e "fetch('https://coffeemap-prod-d7gyys53d1a4cee03.service.tcloudbase.com/api/nearby?location=121.4737,31.2304&radius=500&types=050500&page_num=1&page_size=1').then(r=>r.json()).then(d=>console.log(d.status,(d.pois||[]).length))"
+```
+
+应输出 `1 1`（status=1 且 1 条结果）。再检查线上 bundle 里搜不到那把 Key，即切换完成。
+
+## 回滚
+
+移除 `VITE_AMAP_PROXY` 即可回到直连模式，无需改动任何前端代码。
+
+## 安全设计要点
+
+- **参数严格白名单**：这是公网可访问端点，若原样转发所有查询参数，别人就能拿它当免费的高德任意接口代理。只放行周边搜索真正需要的 8 个参数（`location`、`radius`、`types`、`keywords`、`sortrule`、`page_num`、`page_size`、`show_fields`）。
+- **调用方传入的 `key` 会被丢弃**：函数只用自己环境变量里的 Key。已实测：请求里带伪造 `key` 时仍正常返回结果，证明调用方无法替换 Key。
+- **建议给路由配限流**：`qpsPolicy`（`qpsTotal` 上限 500，`qpsPerClient` 可按 ClientIP 限），避免代理被当作免费额度刷。
+
+## 本地测试（已通过）
+
+不部署也能完整验证：用 Node 起一个本地 HTTP 服务器模拟网关（把 HTTP 请求转成云函数 event），让前端检索层走代理模式跑通端到端。已覆盖并通过：
+
+- 正常 GET 返回高德结果；`OPTIONS` 预检返回 204 + CORS 头
+- **调用方伪造 Key 被忽略**（走白名单丢弃，仍用服务端 Key）
+- 缺 `location` 返回 400；未配置 Key 返回 500 且不请求高德
+- `queryStringParameters` 与 `path` 带查询串两种入参形态都能解析
+- 代理模式下前端**不把 Key 发给服务端**；分片缓存命中时新增请求为 0
+
+## 已知代价
+
+因为检索分片逻辑仍在前端，**每次 2 公里搜索最多触发 32 次函数调用**（500 米默认搜索约 2 次）。函数调用配额与高德配额是两套账，如果调用次数成为瓶颈，需要把整个检索逻辑搬到服务端，把每次搜索压成 1 次调用——那会带来一份重复实现，所以没在这次改动里做。

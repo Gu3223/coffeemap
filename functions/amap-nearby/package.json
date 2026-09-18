@@ -1,0 +1,10 @@
+{
+  "name": "amap-nearby",
+  "version": "1.0.0",
+  "private": true,
+  "description": "高德周边搜索的服务端代理，Key 只存云函数环境变量，不下发到前端",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  }
+}
