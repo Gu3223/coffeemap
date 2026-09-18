@@ -173,6 +173,7 @@ function App() {
   const [cafes, setCafes] = useState([])
   const [cafesStatus, setCafesStatus] = useState('idle')
   const [cafesError, setCafesError] = useState('')
+  const cafesRef = useRef([])
   const watchId = useRef(null)
   const lastSearch = useRef(null)
   const abortRef = useRef(null)
@@ -185,6 +186,7 @@ function App() {
     setCafesError('')
     try {
       const result = await fetchNearbyCafes(nextLocation, controller.signal)
+      cafesRef.current = result
       setCafes(result)
       setSelected(current => result.some(cafe => cafe.id === current) ? current : result[0]?.id || null)
       lastSearch.current = [nextLocation.latitude, nextLocation.longitude]
@@ -192,10 +194,10 @@ function App() {
     } catch (error) {
       if (error.name === 'AbortError') return
       setCafesError('附近门店暂时无法更新，已保留当前结果。')
-      setCafesStatus(cafes.length ? 'ready' : 'error')
-      if (!cafes.length) setCafes(FALLBACK_CAFES)
+      setCafesStatus(cafesRef.current.length ? 'ready' : 'error')
+      if (!cafesRef.current.length) { cafesRef.current = FALLBACK_CAFES; setCafes(FALLBACK_CAFES) }
     }
-  }, [cafes.length])
+  }, [])
 
   const applyPosition = useCallback(position => {
     const next = { latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy, label: '我的实时位置' }
@@ -206,10 +208,11 @@ function App() {
   }, [loadCafes])
 
   const requestLocation = useCallback(() => {
-    if (!navigator.geolocation) { setLocationStatus('error'); setCafesError('当前浏览器不支持定位，正在显示默认区域。'); return }
+    const useDefaultLocation = () => { setLocation(DEFAULT_LOCATION); loadCafes(DEFAULT_LOCATION) }
+    if (!navigator.geolocation) { setLocationStatus('error'); setCafesError('当前浏览器不支持定位，正在显示默认区域。'); useDefaultLocation(); return }
     setLocationStatus('requesting')
-    navigator.geolocation.getCurrentPosition(applyPosition, () => { setLocationStatus('denied'); setCafesError('无法获取当前位置，当前显示丹佛市中心。') }, { enableHighAccuracy:true, timeout:10000, maximumAge:30000 })
-  }, [applyPosition])
+    navigator.geolocation.getCurrentPosition(applyPosition, () => { setLocationStatus('denied'); setCafesError('无法获取当前位置，当前显示丹佛市中心。'); useDefaultLocation() }, { enableHighAccuracy:true, timeout:10000, maximumAge:30000 })
+  }, [applyPosition, loadCafes])
 
   const toggleFollowing = () => {
     if (isFollowing) { if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current); watchId.current = null; setIsFollowing(false); return }
@@ -218,7 +221,7 @@ function App() {
     watchId.current = navigator.geolocation.watchPosition(applyPosition, () => { setLocationStatus('denied'); setIsFollowing(false); setCafesError('实时定位不可用，当前仍显示默认区域。') }, { enableHighAccuracy:true, timeout:15000, maximumAge:10000 })
   }
 
-  useEffect(() => { loadCafes(DEFAULT_LOCATION); return () => { if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current); abortRef.current?.abort() } }, [])
+  useEffect(() => { requestLocation(); return () => { if (watchId.current != null) navigator.geolocation.clearWatch(watchId.current); abortRef.current?.abort() } }, [requestLocation])
 
   const filters = ['全部','营业中','4.5+ 评分','手冲咖啡','奶咖']
   const visible = useMemo(() => {
@@ -232,7 +235,7 @@ function App() {
 
   return <main>
     <header className="header"><a className="brand"><span className="brand-mark">R</span><span>ROAST <i>&</i> ROAM</span></a><nav><a className="active">探索门店</a><a>我的收藏 <sup>{favorites.length || ''}</sup></a></nav><div className="location-actions"><button className="location" onClick={requestLocation}><Navigation size={15}/> {locationLabel} <ChevronDown size={14}/></button><button className={`follow-button ${isFollowing ? 'following' : ''}`} onClick={toggleFollowing} title={isFollowing ? '停止实时跟随' : '开启实时跟随'}><Radio size={15}/>{isFollowing ? '停止跟随' : '实时跟随'}</button></div><button className="mobile-filter"><SlidersHorizontal size={18}/></button></header>
-    <section className="hero"><div><p className="eyebrow">YOUR DAILY CUP, DISCOVERED</p><h1>附近的<br/><em>咖啡店</em></h1></div><div className="hero-note"><span className="vertical-line"/><p>从第一口开始，<br/>认识这座城市。</p></div></section>
+    <section className="hero"><div><p className="eyebrow">YOUR NEXT CUP IS CLOSER THAN YOU THINK</p><h1>马上来<br/><em>一杯</em></h1><p className="hero-subtitle">发现此刻，离你最近的好咖啡。</p></div><div className="hero-note"><span className="vertical-line"/><p>打开定位，<br/>让好味道自己出现。</p></div><div className="hero-orbit" aria-hidden="true"><span>NEARBY</span><strong>02<br/><small>KM</small></strong></div></section>
     <section className="workspace"><div className="list-panel"><div className="location-banner"><div className="location-banner-icon"><LocateFixed size={17}/></div><div><strong>{locationStatus === 'ready' ? '正在探索你附近的咖啡店' : '发现你附近的咖啡店'}</strong><span>{locationStatus === 'ready' ? `以 ${locationLabel} 为中心 · 2 km 范围` : '允许定位后，结果会更贴近你'}</span></div><button onClick={requestLocation}>{locationStatus === 'ready' ? '更新位置' : '使用当前位置'}</button></div><div className="search"><Search size={18}/><input value={query} onChange={event => setQuery(event.target.value)} placeholder="搜索店名、街区或风味..."/>{query && <button onClick={() => setQuery('')}><X size={16}/></button>}</div><div className="toolbar"><div className="filter-scroll">{filters.map(value => <button key={value} className={filter === value ? 'chosen' : ''} onClick={() => setFilter(value)}>{value}</button>)}</div><button className="sort" onClick={() => setSort(sort === '推荐排序' ? '距离优先' : sort === '距离优先' ? '评分优先' : '推荐排序')}><ArrowUpDown size={14}/>{sort}</button></div><div className="result-head"><p><strong>{visible.length}</strong> 家值得探索</p><span>{cafesStatus === 'loading' ? '正在更新…' : cafesStatus === 'error' ? '使用默认数据' : dataSourceLabel}</span></div>{cafesError && <div className="notice error"><AlertCircle size={15}/><span>{cafesError}</span><button onClick={() => loadCafes(location)}><RotateCcw size={14}/></button></div>}<div className="cards">{cafesStatus === 'loading' && !cafes.length ? <div className="empty"><LoaderCircle className="spin" size={25}/><h3>正在寻找附近的咖啡店</h3><p>{AMAP_KEY ? '正在连接高德地图，必要时自动回退。' : '正在连接 OpenStreetMap。'}</p></div> : visible.length ? visible.map(cafe => <CafeCard key={cafe.id} cafe={cafe} selected={selected === cafe.id} favorite={favorites.includes(cafe.id)} onSelect={setSelected} onFavorite={toggleFavorite} onNavigate={openNavigation} onDetails={setDetailCafe}/>) : <div className="empty"><Coffee size={25}/><h3>没有找到这杯咖啡</h3><p>试试换个关键词或筛选条件。</p></div>}</div></div><MapView visibleCafes={visible} selected={selected} onSelect={setSelected} location={location} accuracy={location.accuracy} onLocate={requestLocation}/></section><CafeDetailDrawer cafe={detailCafe} favorite={detailCafe ? favorites.includes(detailCafe.id) : false} onClose={() => setDetailCafe(null)} onFavorite={toggleFavorite} onNavigate={openNavigation}/>
   </main>
 }
