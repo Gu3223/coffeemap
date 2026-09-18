@@ -15,8 +15,12 @@ const AMAP_ENDPOINT = 'https://restapi.amap.com/v5/place/around'
 const AMAP_KEY = import.meta.env.VITE_AMAP_KEY || ''
 const AMAP_KEYWORDS = { cafe: ['咖啡', '咖啡馆', '咖啡厅', 'coffee'], internet_cafe: ['网吧', '网咖', '电竞馆'], massage: ['按摩', '推拿', '足疗', 'SPA'] }
 const AMAP_PAGE_SIZE = 25
-const AMAP_MAX_PAGES = 8
+const AMAP_KEYWORD_LIMIT = 2
+const AMAP_MAX_PAGES = 2
+const AMAP_REQUEST_DELAY_MS = 350
+const AMAP_CACHE_TTL_MS = 5 * 60 * 1000
 const MAX_RESULTS = 200
+const amapCache = new Map()
 
 function haversineKm(a, b) {
   const radians = value => value * Math.PI / 180
@@ -61,9 +65,20 @@ function normalizeAmapPoi(poi, origin, index, category) {
   return { id: `amap-${poi.id}`, amapPoiId: poi.id, name: poi.name || '未命名地点', address: poi.address || poi.pname || '地址未标注', category: category === 'internet_cafe' ? '网吧' : category === 'massage' ? '按摩店' : poi.type?.split(';').pop() || '咖啡店', rating: Number.isFinite(rating) && rating > 0 ? rating : null, reviews: Number(business.rating_num || business.review_num) || null, distanceKm: Number(poi.distance || haversineKm([origin.latitude, origin.longitude], [latitude, longitude]) * 1000) / 1000, open: null, openingHours: business.opentime_week || business.opentime || null, ...pricing, studySuitability: study.label, studyReason: study.reason, massageProfile: massage.label, massageReason: massage.reason, tags: [business.tag || null].filter(Boolean), image: photos[0] || null, photos, position: [latitude, longitude], color: colorFor(index), source: 'amap', tel: poi.tel || null }
 }
 
+function wait(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms)
+    signal.addEventListener('abort', () => {
+      clearTimeout(timer)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }, { once: true })
+  })
+}
+
 async function fetchAmapKeyword(location, signal, radiusMeters, category, keyword) {
   const pages = []
   for (let page = 1; page <= AMAP_MAX_PAGES && pages.length < MAX_RESULTS; page += 1) {
+    if (page > 1) await wait(AMAP_REQUEST_DELAY_MS, signal)
     const params = new URLSearchParams({ key: AMAP_KEY, location: `${location.longitude},${location.latitude}`, radius: String(radiusMeters), keywords: keyword, sortrule: 'distance', page_num: String(page), page_size: String(AMAP_PAGE_SIZE), show_fields: 'business,photos' })
     const response = await fetch(`${AMAP_ENDPOINT}?${params}`, { signal })
     if (!response.ok) throw new Error(`Amap HTTP ${response.status}`)
@@ -76,7 +91,24 @@ async function fetchAmapKeyword(location, signal, radiusMeters, category, keywor
 
 async function fetchAmapCafes(location, signal, radiusMeters, category) {
   if (!AMAP_KEY) throw new Error('MISSING_AMAP_KEY')
-  const keywordResults = await Promise.all(AMAP_KEYWORDS[category].map(keyword => fetchAmapKeyword(location, signal, radiusMeters, category, keyword)))
+  const cacheKey = `${location.latitude.toFixed(3)},${location.longitude.toFixed(3)}:${radiusMeters}:${category}`
+  const cached = amapCache.get(cacheKey)
+  if (cached && Date.now() - cached.timestamp < AMAP_CACHE_TTL_MS) return cached.places
+
+  const keywordResults = []
+  let lastError = null
+  const keywords = AMAP_KEYWORDS[category].slice(0, AMAP_KEYWORD_LIMIT)
+  for (const [index, keyword] of keywords.entries()) {
+    if (index > 0) await wait(AMAP_REQUEST_DELAY_MS, signal)
+    try {
+      keywordResults.push(await fetchAmapKeyword(location, signal, radiusMeters, category, keyword))
+    } catch (error) {
+      if (error.name === 'AbortError') throw error
+      lastError = error
+    }
+  }
+  if (!keywordResults.length && lastError) throw lastError
+
   const seen = new Map(); let index = 0
   for (const poi of keywordResults.flat()) {
     const normalized = normalizeAmapPoi(poi, location, index, category); index += 1
@@ -85,7 +117,9 @@ async function fetchAmapCafes(location, signal, radiusMeters, category) {
     if (!duplicate) seen.set(normalized.amapPoiId, normalized)
     else if ((!duplicate.rating && normalized.rating) || (!duplicate.image && normalized.image)) seen.set(duplicate.amapPoiId, { ...duplicate, ...normalized, id: duplicate.id, amapPoiId: duplicate.amapPoiId })
   }
-  return [...seen.values()].slice(0, MAX_RESULTS).sort((a, b) => ((b.rating ?? -1) - (a.rating ?? -1)) || a.distanceKm - b.distanceKm)
+  const places = [...seen.values()].slice(0, MAX_RESULTS).sort((a, b) => ((b.rating ?? -1) - (a.rating ?? -1)) || a.distanceKm - b.distanceKm)
+  amapCache.set(cacheKey, { timestamp: Date.now(), places })
+  return places
 }
 
 async function fetchNearbyPlaces(location, signal, radiusMeters, category) {
