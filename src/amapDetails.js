@@ -3,9 +3,18 @@
  * 且脱离 Vite 后要能在 Node 里直接跑测试。
  */
 let detailProxyUrl = ''
+let detailFetchImpl = null
 
 export function configureAmapDetails(next = {}) {
-  detailProxyUrl = next.proxyUrl || ''
+  if ('proxyUrl' in next) detailProxyUrl = next.proxyUrl || ''
+  if ('fetchImpl' in next) detailFetchImpl = next.fetchImpl || null
+}
+
+/** 小程序无 fetch，平台入口注入基于 wx.request 的实现；网页默认用全局 fetch */
+function doFetch(...args) {
+  const impl = detailFetchImpl || globalThis.fetch
+  if (!impl) throw new Error('NO_FETCH_IMPLEMENTATION')
+  return impl(...args)
 }
 const DETAIL_CACHE_TTL_MS = 10 * 60 * 1000
 const POI_ID_PATTERN = /^B0[A-Za-z0-9]{4,30}$/
@@ -73,7 +82,7 @@ export async function fetchAmapPlaceDetail(amapPoiId, signal) {
   if (cached && Date.now() - cached.timestamp < DETAIL_CACHE_TTL_MS) return cached.detail
 
   const params = new URLSearchParams({ id: amapPoiId })
-  const response = await fetch(`${detailProxyUrl}?${params}`, { signal })
+  const response = await doFetch(`${detailProxyUrl}?${params}`, { signal })
   if (!response.ok) throw new Error('DETAIL_PROXY_UNAVAILABLE')
   const data = await response.json()
   if (data.status !== '1') {

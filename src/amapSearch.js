@@ -30,10 +30,20 @@ const AMAP_ENDPOINT = 'https://restapi.amap.com/v5/place/around'
  *   2. 脱离 Vite 也能在 Node 里跑测试，不必再替换源码字符串。
  * main.jsx（网页）与小程序入口各自调用一次 configureAmapSearch 即可。
  */
-let runtimeConfig = { key: '', proxyUrl: '' }
+let runtimeConfig = { key: '', proxyUrl: '', fetchImpl: null }
 
 export function configureAmapSearch(next = {}) {
   runtimeConfig = { ...runtimeConfig, ...next }
+}
+
+/**
+ * 取请求实现。小程序里没有 fetch，平台入口传一个基于 wx.request 的适配实现即可；
+ * 网页不传，默认用全局 fetch。默认值延迟到调用时取，便于 polyfill 或测试替换。
+ */
+function doFetch(...args) {
+  const impl = runtimeConfig.fetchImpl || globalThis.fetch
+  if (!impl) throw new Error('NO_FETCH_IMPLEMENTATION')
+  return impl(...args)
 }
 const AMAP_PAGE_SIZE = 25
 const AMAP_MAX_PAGE = 8
@@ -98,7 +108,7 @@ async function requestPage(params, category, signal) {
   for (let attempt = 0; ; attempt += 1) {
     try {
       return await scheduleRequest(async () => {
-        const response = await fetch(buildRequestUrl(params, category), { signal })
+        const response = await doFetch(buildRequestUrl(params, category), { signal })
         if (!response.ok) {
           const error = new Error(runtimeConfig.proxyUrl ? 'PROXY_UNAVAILABLE' : `Amap HTTP ${response.status}`)
           if (runtimeConfig.proxyUrl) error.code = 'PROXY_UNAVAILABLE'
