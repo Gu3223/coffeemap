@@ -50,6 +50,16 @@
 .tags .tag-mine{background:#3f7d6a;border-color:#3f7d6a;color:#fff}
 /* 连锁标记：低调的暖灰，只做提示，不抢独立小店的视觉 */
 .tags .tag-chain{background:#efe9e0;border-color:#e2d8ca;color:#8a7f70}
+/* 口碑推荐用强调色，表示正向推荐，与「连锁」灰标区分 */
+.tags .tag-curated{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* 抽屉里的口碑块 */
+.curated-note{margin:0 0 15px;padding:13px 15px;border:1px solid #e3d3c6;background:#fbf5f0}
+.curated-head{display:flex;align-items:baseline;gap:7px;margin-bottom:7px}
+.curated-head strong{font:17px 'DM Mono',monospace;color:var(--accent)}
+.curated-max{font:10px 'DM Mono',monospace;color:var(--muted)}
+.curated-text{margin:0 0 6px;font-size:12px;line-height:1.6}
+.curated-source{margin:0;font:10px 'DM Mono',monospace;color:var(--muted)}
 
 /* 抽屉里的「正在补充高德公开信息」状态与在线字段表 */
 .detail-status{display:flex;align-items:center;gap:6px;margin:0 0 13px;padding:8px 10px;background:#f1f5f0;color:#477c75;font-size:11px}
