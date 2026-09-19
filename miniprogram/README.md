@@ -43,6 +43,27 @@ npm run build:weapp        # 产物在 miniprogram/dist
 
 开发时用 `npm run dev:weapp` 持续监听。
 
+## 构建时踩到的两件事
+
+1. 装完依赖直接构建会报 `Cannot find module '@babel/preset-react'`，需要补装 **7.x** 版本：
+
+   ```bash
+   npm install -D "@babel/preset-react@^7" "@babel/preset-env@^7"
+   ```
+
+   必须写 `^7`：最新的 8.x 要求 `@babel/core@^8`，而 Taro 4 依赖 7.x，直接 `npm i -D @babel/preset-react` 会报 `ERESOLVE`。
+
+2. `npm install` 会警告 8 个包的 install 脚本未执行（`@tarojs/binding`、`@swc/core`、`esbuild` 等）。实测**不影响 weapp 构建**，`taro build --type weapp` 正常通过（19 秒）。
+
+另外：小程序构建会把**所有非 ASCII 字符转成 `\uXXXX` 转义**。在 `dist/` 里直接搜中文会搜不到，属正常；要核对内容请搜转义形式，或搜 ASCII 部分（如 POI id）。
+
+## 已验证
+
+- `npm install` 成功（1130 包，Taro 4.2.1）
+- `npm run build:weapp` 成功，产物在 `dist/`
+- 产物内容核对：代理契约（发 `category`）、口碑清单（含 93 条来源标注与已解析的 POI id）、连锁关键词、强调色全部在包内
+- `app.json` 含 `permission.scope.userLocation` 与 `requiredPrivateInfos: ["getLocation"]`
+
 ## 小程序侧还需要你在后台做的
 
 1. **开通云开发并关联环境**（或继续用 HTTP 网关，见下）。
