@@ -73,12 +73,14 @@ npm run preview
 ```env
 VITE_AMAP_KEY=你的高德Web服务Key
 VITE_AMAP_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/nearby
+VITE_AMAP_DETAIL_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/place-detail
 ```
 
 - 部署云函数时，`cloudbaserc.json` 通过 `{{env.VITE_AMAP_KEY}}` 把它注入函数环境变量（文件里不写明文，因为它会被提交进 Git）；
-- 想把前端临时切回「直连高德」的老模式，注释掉 `VITE_AMAP_PROXY` 那一行即可。
+- `VITE_AMAP_PROXY` 是附近搜索的代理，`VITE_AMAP_DETAIL_PROXY` 是门店详情的代理。两个云函数共用同一把服务端 Key；
+- 想把前端临时切回「直连高德」的老模式，注释掉 `VITE_AMAP_PROXY` 那一行即可（详情增强会自动降级，抽屉只显示基础信息）。
 
-`.env` 已被 Git 忽略，真实 Key 不应写进 GitHub。云函数、网关域名、限流与回滚的完整说明见 [`functions/amap-nearby/README.md`](./functions/amap-nearby/README.md)。
+`.env` 已被 Git 忽略，真实 Key 不应写进 GitHub。两个云函数的完整说明见 [`functions/amap-nearby/README.md`](./functions/amap-nearby/README.md)。
 
 ## CloudBase 部署
 
@@ -91,8 +93,8 @@ VITE_AMAP_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.
 | 当前线上版本 | `coffeemap-012` |
 | 构建命令 | `npm run build` |
 | 输出目录 | `dist` |
-| 构建环境变量 | `VITE_AMAP_PROXY`（高德 Key 已移到云函数，不再进前端包） |
-| 云函数 | `amap-nearby`，网关路由 `/api/nearby` |
+| 构建环境变量 | `VITE_AMAP_PROXY`、`VITE_AMAP_DETAIL_PROXY`（高德 Key 已移到云函数，不再进前端包） |
+| 云函数 | `amap-nearby`（路由 `/api/nearby`）、`amap-place-detail`（路由 `/api/place-detail`） |
 
 首次使用时登录并切换环境：
 
@@ -113,7 +115,7 @@ npm run deploy:cloudbase
 npm run deploy:fn
 ```
 
-部署配置位于 [`cloudbaserc.json`](./cloudbaserc.json)：`app` 段声明 Web 应用的构建环境变量，`functions` 段声明云函数 `amap-nearby`（Key 以 `{{env.VITE_AMAP_KEY}}` 引用，不写明文）。它不会上传本地 `.env` 文件。
+部署配置位于 [`cloudbaserc.json`](./cloudbaserc.json)：`app` 段声明 Web 应用的构建环境变量，`functions` 段声明两个云函数 `amap-nearby` 与 `amap-place-detail`（Key 都以 `{{env.VITE_AMAP_KEY}}` 引用，不写明文）。它不会上传本地 `.env` 文件。
 
 ## GitHub 同步
 
@@ -142,6 +144,14 @@ git show 提交号
 - `91e119a`：附近搜索改为按 POI 分类检索 + 环形分片（2 公里召回 191 → 369 家）
 - `4f628a6`：新增服务端代理云函数（`functions/amap-nearby`）
 - `d29560e`：前端切到代理模式，高德 Key 移出浏览器
+- `631c3f5`：给代理路由加限流并记录部署细节
+- `f973d2c`：代理收紧为「只按分类查询」，不再接受调用方自选的 `types`/`keywords`
+- `a7a5fb3`：新增「我的标记」（本地存储）
+- `f015aab`：补完门店详情增强，并修掉它弄坏的构建
+- `d2fa8b2`：收藏持久化，导航「我的收藏」可用
+- `b9d54c2`：视觉打磨（首屏折叠线、筛选行截断、地图标记聚合）
+- `17b6ad9`：改名「半醒半松」并换字体系统
+- `854e551`：字标降字重、店名改黑体、配色降饱和
 
 ## 新对话继续开发
 
