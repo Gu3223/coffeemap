@@ -45,3 +45,12 @@
 .my-note-input{width:100%;padding:8px 10px;border:1px solid var(--line);background:#fff;font:11px 'DM Sans','Microsoft Yahei',sans-serif;color:var(--ink)}
 .my-note-input:focus{outline:none;border-color:var(--accent)}
 .tags .tag-mine{background:#3f7d6a;border-color:#3f7d6a;color:#fff}
+
+/* 抽屉里的「正在补充高德公开信息」状态与在线字段表 */
+.detail-status{display:flex;align-items:center;gap:6px;margin:0 0 13px;padding:8px 10px;background:#f1f5f0;color:#477c75;font-size:11px}
+.detail-status.error{background:#f8eee7;color:#995c42}
+.online-facts{display:grid;grid-template-columns:1fr 1fr;gap:9px 14px;margin:0 0 15px;padding:13px 15px;border:1px solid var(--line);background:#fcfaf7}
+.online-facts div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.online-facts dt{font:10px 'DM Mono',monospace;color:var(--muted)}
+.online-facts dd{margin:0;font-size:12px;overflow-wrap:anywhere}
+@media(max-width:800px){.online-facts{grid-template-columns:1fr}}

@@ -5,6 +5,7 @@ import { Circle, MapContainer, Marker, Popup, TileLayer, ZoomControl, useMap } f
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { fetchNearbyPlaces, haversineKm } from './amapSearch'
+import { fetchAmapPlaceDetail, hasAmapPoiId, mergeAmapDetail } from './amapDetails'
 import { NOTE_ATTRIBUTES, isStudyFriendly, noteKeyOf, readNotes, updateNote } from './placeNotes'
 import './styles.css'
 
@@ -20,8 +21,8 @@ function buildXiaohongshuSearchUrl(place) { return `https://www.xiaohongshu.com/
 // 高德自己的门店页（实测 HTTP 200）。评价正文与更多图片高德不通过 API 提供，但它的网页上有，
 // 所以把「看评价」这件事零成本外包出去，不消耗我们的接口配额。
 function buildAmapPlaceUrl(place) { return `https://www.amap.com/place/${place.amapPoiId}` }
-// 高德 POI id 形如 B0L0LM8N6M；缺失时我们会用「名称+坐标」兜底生成，那种 id 拼出来的链接会 404
-function hasAmapPoiId(place) { return /^B0[A-Za-z0-9]+$/.test(place.amapPoiId || '') }
+// POI id 判定统一走 ./amapDetails 的 hasAmapPoiId（高德 id 形如 B0L0LM8N6M；
+// 我们兜底生成的「名称+坐标」id 拼出来的链接会 404）
 // 高德偶尔返回 0.4、1.7 这种极低分，直接显示成「0.4 分 + 0 颗星」看起来像页面坏了
 const RELIABLE_RATING_MIN = 2
 function openCafeNavigation(place) { window.open(buildAmapNavigationUrl(place), '_blank', 'noopener,noreferrer') }
@@ -67,12 +68,53 @@ function MyNoteEditor({ place, note, onChange }) {
   </section>
 }
 
-function CafeDetailDrawer({ place, favorite, note, onClose, onFavorite, onNavigate, onNoteChange }) {
+function CafeDetailDrawer({ place, favorite, note, detailStatus, onClose, onFavorite, onNavigate, onNoteChange }) {
   if (!place) return null
   const status = place.open === true ? '营业中' : place.open === false ? '已打烊' : '营业时间未知'
   const classification = place.studySuitability && place.studySuitability !== '未判断' ? place.studySuitability : place.massageProfile
   const classificationReason = place.studyReason || place.massageReason
-  return <div className="drawer-backdrop" onClick={onClose}><aside className="detail-drawer" onClick={event => event.stopPropagation()}><button className="drawer-close" onClick={onClose} aria-label="关闭"><X size={19}/></button><div className="drawer-photo"><PhotoGallery photos={place.photos?.length ? place.photos : (place.image ? [place.image] : [])} name={place.name}/><span className={`open-pill ${place.open === false ? 'closed' : 'unknown'}`}>{status}</span></div><div className="drawer-content"><div className="drawer-kicker">AMAP PLACE</div><div className="drawer-title-row"><div><h2>{place.name}</h2><p>{place.address}</p></div><button className={`heart drawer-heart ${favorite ? 'liked' : ''}`} onClick={() => onFavorite(place.id)}><Heart size={17} fill={favorite ? 'currentColor' : 'none'}/></button></div><div className="drawer-rating"><Rating value={place.rating}/><span>{place.rating != null && place.rating >= RELIABLE_RATING_MIN ? (place.reviews ? `${place.reviews} 条评价` : '高德评分') : (place.rating == null ? '暂无评分 · 等待更多用户评价' : '高德评分样本较少')}</span></div><div className="drawer-facts"><span><Navigation size={15}/>{place.distanceKm.toFixed(1)} km</span><span><Clock3 size={15}/>{place.openingHours || status}</span><span className="price-fact"><Coffee size={15}/>{place.priceLabel || place.priceLevel || '价格未知'}</span></div>{(place.tags.length || classification) > 0 && <div className="drawer-tags">{[...place.tags, classification].filter(Boolean).map(tag => <span key={tag}>{tag}</span>)}</div>}{classificationReason && <p className="classification-reason">{classificationReason}</p>}<MyNoteEditor place={place} note={note} onChange={patch => onNoteChange(place, patch)}/><div className="drawer-links"><a href={buildXiaohongshuSearchUrl(place)} target="_blank" rel="noreferrer">去小红书看评价 <ExternalLink size={13}/></a>{hasAmapPoiId(place) && <a href={buildAmapPlaceUrl(place)} target="_blank" rel="noreferrer">在高德看门店图片与评价 <ExternalLink size={13}/></a>}</div><button className="drawer-navigation" onClick={() => onNavigate(place)}><Navigation size={17}/>打开高德导航<ExternalLink size={15}/></button><p className="drawer-footnote">门店基础信息来自高德地点数据；评价正文与更多图片由高德网页提供，本站不存储。分类标签是辅助判断，仅供参考，按摩服务请自行核实。</p></div></aside></div>
+  const onlineFacts = [
+    ['今日营业', place.todayHours],
+    ['电话', place.tel],
+    ['商圈', place.businessArea],
+    ['楼层', place.floor],
+    ['入口导航', place.hasEntrance ? '已提供' : null]
+  ].filter(([, value]) => value)
+
+  return <div className="drawer-backdrop" onClick={onClose}>
+    <aside className="detail-drawer" onClick={event => event.stopPropagation()}>
+      <button className="drawer-close" onClick={onClose} aria-label="关闭"><X size={19}/></button>
+      <div className="drawer-photo">
+        <PhotoGallery photos={place.photos?.length ? place.photos : (place.image ? [place.image] : [])} name={place.name}/>
+        <span className={`open-pill ${place.open === false ? 'closed' : 'unknown'}`}>{status}</span>
+      </div>
+      <div className="drawer-content">
+        <div className="drawer-kicker">AMAP PLACE</div>
+        {detailStatus === 'loading' && <p className="detail-status"><LoaderCircle className="spin" size={14}/>正在补充高德公开信息</p>}
+        {detailStatus === 'error' && <p className="detail-status error"><AlertCircle size={14}/>详情暂时不可用，已保留基础信息</p>}
+        <div className="drawer-title-row">
+          <div><h2>{place.name}</h2><p>{place.address}</p></div>
+          <button className={`heart drawer-heart ${favorite ? 'liked' : ''}`} onClick={() => onFavorite(place.id)}><Heart size={17} fill={favorite ? 'currentColor' : 'none'}/></button>
+        </div>
+        <div className="drawer-rating"><Rating value={place.rating}/><span>{place.reviews ? `${place.reviews} 条评价` : place.rating == null ? '暂无评分' : '高德评分'}</span></div>
+        <div className="drawer-facts">
+          <span><Navigation size={15}/>{place.distanceKm.toFixed(1)} km</span>
+          <span><Clock3 size={15}/>{place.openingHours || status}</span>
+          <span className="price-fact"><Coffee size={15}/>{place.priceLabel || place.priceLevel || '价格未知'}</span>
+        </div>
+        {onlineFacts.length > 0 && <dl className="online-facts">{onlineFacts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>}
+        {(place.tags.length || classification || place.alias) > 0 && <div className="drawer-tags">{[...place.tags, classification, place.alias].filter(Boolean).map(tag => <span key={tag}>{tag}</span>)}</div>}
+        {classificationReason && <p className="classification-reason">{classificationReason}</p>}
+        <MyNoteEditor place={place} note={note} onChange={patch => onNoteChange(place, patch)}/>
+        <div className="drawer-links">
+          <a href={buildXiaohongshuSearchUrl(place)} target="_blank" rel="noreferrer">去小红书看评价 <ExternalLink size={13}/></a>
+          {hasAmapPoiId(place.amapPoiId) && <a href={buildAmapPlaceUrl(place)} target="_blank" rel="noreferrer">在高德看门店图片与评价 <ExternalLink size={13}/></a>}
+        </div>
+        <button className="drawer-navigation" onClick={() => onNavigate(place)}><Navigation size={17}/>打开高德导航<ExternalLink size={15}/></button>
+        <p className="drawer-footnote">门店公开信息来自高德；评价正文由高德门店页展示，本站不存储。</p>
+      </div>
+    </aside>
+  </div>
 }
 
 function Recenter({ center, onLocate }) { const map = useMap(); useEffect(() => { map.flyTo(center, 14, { duration: .7 }) }, [center, map]); return <button className="recenter" title="回到当前位置" onClick={() => { map.flyTo(center, 14); onLocate?.() }}><LocateFixed size={16}/></button> }
@@ -89,6 +131,22 @@ function App() {
   const [selected, setSelected] = useState(null); const [detailPlace, setDetailPlace] = useState(null); const [favorites, setFavorites] = useState([]); const [location, setLocation] = useState(null); const [locationStatus, setLocationStatus] = useState('idle'); const [isFollowing, setIsFollowing] = useState(false); const [places, setPlaces] = useState([]); const [placesStatus, setPlacesStatus] = useState('location-required'); const [placesError, setPlacesError] = useState('')
   const [notes, setNotes] = useState(() => readNotes())
   const setPlaceNote = useCallback((place, patch) => setNotes(current => updateNote(current, noteKeyOf(place), patch)), [])
+
+  // 打开抽屉时补拉一次高德 POI 详情（今日营业时间、电话、商圈、别名、更多图片、入口导航）。
+  // 失败只降级提示，基础信息照常显示 —— 详情是增强项，不能因为它是坏的就连列表都看不了。
+  const [detailState, setDetailState] = useState({ id: null, status: 'idle', detail: null })
+  useEffect(() => {
+    if (!detailPlace) { setDetailState({ id: null, status: 'idle', detail: null }); return undefined }
+    if (!hasAmapPoiId(detailPlace.amapPoiId)) { setDetailState({ id: detailPlace.id, status: 'unavailable', detail: null }); return undefined }
+    const controller = new AbortController()
+    setDetailState({ id: detailPlace.id, status: 'loading', detail: null })
+    fetchAmapPlaceDetail(detailPlace.amapPoiId, controller.signal)
+      .then(detail => { if (!controller.signal.aborted) setDetailState({ id: detailPlace.id, status: 'ready', detail }) })
+      .catch(error => { if (error.name !== 'AbortError' && !controller.signal.aborted) setDetailState({ id: detailPlace.id, status: 'error', detail: null }) })
+    return () => controller.abort()
+  }, [detailPlace])
+  const drawerPlace = detailPlace ? mergeAmapDetail(detailPlace, detailState.id === detailPlace.id ? detailState.detail : null) : null
+  const drawerDetailStatus = detailPlace && detailState.id === detailPlace.id ? detailState.status : 'idle'
   const watchId = useRef(null); const lastSearch = useRef(null); const abortRef = useRef(null); const placesRef = useRef([]); const radiusRef = useRef(DEFAULT_RADIUS_METERS); const categoryRef = useRef(DEFAULT_CATEGORY)
   radiusRef.current = radiusMeters; categoryRef.current = placeCategory
 
@@ -118,7 +176,7 @@ function App() {
 
   return <main><header className="header"><a className="brand"><span className="brand-mark">寻</span><span>寻一杯</span></a><nav><a className="active">探索门店</a><a>我的收藏 <sup>{favorites.length || ''}</sup></a></nav><div className="location-actions"><button className="location" onClick={requestLocation}><Navigation size={15}/> {locationLabel} <ChevronDown size={14}/></button><button className={`follow-button ${isFollowing ? 'following' : ''}`} onClick={toggleFollowing}><Radio size={15}/>{isFollowing ? '停止跟随' : '实时跟随'}</button></div><button className="mobile-filter"><SlidersHorizontal size={18}/></button></header>
     <section className="hero"><div><p className="eyebrow">YOUR NEXT CUP IS CLOSER THAN YOU THINK</p><h1>寻一<br/><em>杯</em></h1><p className="hero-subtitle">只在你身边，寻找刚刚好的那一杯。</p></div><div className="hero-note"><span className="vertical-line"/><p>打开定位，<br/>只探索你身边。</p></div><div className="hero-orbit" aria-hidden="true"><span>RADIUS</span><strong>{radiusMeters >= 1000 ? radiusMeters / 1000 : radiusMeters / 1000}<br/><small>{radiusMeters >= 1000 ? 'KM' : 'KM'}</small></strong></div></section>
-    <section className="workspace"><div className="list-panel"><div className="explore-controls"><div className="category-tabs">{CATEGORY_OPTIONS.map(option => <button key={option.id} className={placeCategory === option.id ? 'active' : ''} onClick={() => changeCategory(option.id)}><span>{option.icon}</span>{option.label}</button>)}</div><div className="radius-tabs"><span>范围</span>{RADIUS_OPTIONS.map(option => <button key={option.meters} className={radiusMeters === option.meters ? 'active' : ''} onClick={() => changeRadius(option.meters)}>{option.label}</button>)}</div></div><div className="location-banner"><div className="location-banner-icon"><LocateFixed size={17}/></div><div><strong>{location ? `正在探索你附近的${activeCategory.label}` : locationStatus === 'requesting' ? '正在获取当前位置' : '请先开启位置权限'}</strong><span>{locationMessage}</span></div><button onClick={requestLocation}>{location ? '更新位置' : '使用当前位置'}</button></div><div className="search"><Search size={18}/><input value={query} onChange={event => setQuery(event.target.value)} placeholder={`搜索${activeCategory.label}名称、街区或关键词...`}/>{query && <button onClick={() => setQuery('')}><X size={16}/></button>}</div><div className="toolbar"><div className="filter-scroll">{filters.map(value => <button key={value} className={filter === value ? 'chosen' : ''} onClick={() => setFilter(value)}>{value}</button>)}</div><button className="sort" onClick={() => setSort(sort === '距离优先' ? '评分优先' : '距离优先')}><ArrowUpDown size={14}/>{sort}</button></div><div className="result-head"><p><strong>{visible.length}</strong> 家{activeCategory.label}地点</p><span>{placesStatus === 'loading' ? '正在更新…' : placesStatus === 'error' ? '高德请求失败' : placesStatus === 'missing-key' ? '未配置高德 Key' : dataSourceLabel}</span></div>{placesError && <div className="notice error"><AlertCircle size={15}/><span>{placesError}</span><button onClick={retryPlaces}><RotateCcw size={14}/></button></div>}<div className="cards">{placesStatus === 'loading' && !places.length ? <div className="empty"><LoaderCircle className="spin" size={25}/><h3>正在寻找附近的{activeCategory.label}</h3><p>只请求当前位置附近的数据。</p></div> : visible.length ? visible.map(place => <CafeCard key={place.id} place={place} selected={selected === place.id} favorite={favorites.includes(place.id)} note={notes[noteKeyOf(place)]} onSelect={setSelected} onFavorite={toggleFavorite} onNavigate={openNavigation} onDetails={setDetailPlace}/>) : <div className="empty"><Coffee size={25}/><h3>{locationRequired ? '请先开启定位' : placesStatus === 'missing-key' ? '需要配置高德 Key' : placesStatus === 'empty' ? `当前 ${radiusMeters >= 1000 ? `${radiusMeters / 1000}km` : `${radiusMeters}m`} 内没有找到地点` : '高德暂时没有返回结果'}</h3><p>{locationRequired ? '允许定位后，只会查询你当前位置附近的地点。' : placesStatus === 'missing-key' ? '请在部署环境中设置 VITE_AMAP_KEY。' : '可以扩大范围后重新搜索。'}</p></div>}</div></div><MapView places={visible} selected={selected} onSelect={setSelected} location={location} accuracy={location?.accuracy} onLocate={requestLocation}/></section><CafeDetailDrawer place={detailPlace} favorite={detailPlace ? favorites.includes(detailPlace.id) : false} note={detailPlace ? notes[noteKeyOf(detailPlace)] : undefined} onClose={() => setDetailPlace(null)} onFavorite={toggleFavorite} onNavigate={openNavigation} onNoteChange={setPlaceNote}/>
+    <section className="workspace"><div className="list-panel"><div className="explore-controls"><div className="category-tabs">{CATEGORY_OPTIONS.map(option => <button key={option.id} className={placeCategory === option.id ? 'active' : ''} onClick={() => changeCategory(option.id)}><span>{option.icon}</span>{option.label}</button>)}</div><div className="radius-tabs"><span>范围</span>{RADIUS_OPTIONS.map(option => <button key={option.meters} className={radiusMeters === option.meters ? 'active' : ''} onClick={() => changeRadius(option.meters)}>{option.label}</button>)}</div></div><div className="location-banner"><div className="location-banner-icon"><LocateFixed size={17}/></div><div><strong>{location ? `正在探索你附近的${activeCategory.label}` : locationStatus === 'requesting' ? '正在获取当前位置' : '请先开启位置权限'}</strong><span>{locationMessage}</span></div><button onClick={requestLocation}>{location ? '更新位置' : '使用当前位置'}</button></div><div className="search"><Search size={18}/><input value={query} onChange={event => setQuery(event.target.value)} placeholder={`搜索${activeCategory.label}名称、街区或关键词...`}/>{query && <button onClick={() => setQuery('')}><X size={16}/></button>}</div><div className="toolbar"><div className="filter-scroll">{filters.map(value => <button key={value} className={filter === value ? 'chosen' : ''} onClick={() => setFilter(value)}>{value}</button>)}</div><button className="sort" onClick={() => setSort(sort === '距离优先' ? '评分优先' : '距离优先')}><ArrowUpDown size={14}/>{sort}</button></div><div className="result-head"><p><strong>{visible.length}</strong> 家{activeCategory.label}地点</p><span>{placesStatus === 'loading' ? '正在更新…' : placesStatus === 'error' ? '高德请求失败' : placesStatus === 'missing-key' ? '未配置高德 Key' : dataSourceLabel}</span></div>{placesError && <div className="notice error"><AlertCircle size={15}/><span>{placesError}</span><button onClick={retryPlaces}><RotateCcw size={14}/></button></div>}<div className="cards">{placesStatus === 'loading' && !places.length ? <div className="empty"><LoaderCircle className="spin" size={25}/><h3>正在寻找附近的{activeCategory.label}</h3><p>只请求当前位置附近的数据。</p></div> : visible.length ? visible.map(place => <CafeCard key={place.id} place={place} selected={selected === place.id} favorite={favorites.includes(place.id)} note={notes[noteKeyOf(place)]} onSelect={setSelected} onFavorite={toggleFavorite} onNavigate={openNavigation} onDetails={setDetailPlace}/>) : <div className="empty"><Coffee size={25}/><h3>{locationRequired ? '请先开启定位' : placesStatus === 'missing-key' ? '需要配置高德 Key' : placesStatus === 'empty' ? `当前 ${radiusMeters >= 1000 ? `${radiusMeters / 1000}km` : `${radiusMeters}m`} 内没有找到地点` : '高德暂时没有返回结果'}</h3><p>{locationRequired ? '允许定位后，只会查询你当前位置附近的地点。' : placesStatus === 'missing-key' ? '请在部署环境中设置 VITE_AMAP_KEY。' : '可以扩大范围后重新搜索。'}</p></div>}</div></div><MapView places={visible} selected={selected} onSelect={setSelected} location={location} accuracy={location?.accuracy} onLocate={requestLocation}/></section><CafeDetailDrawer place={drawerPlace} favorite={drawerPlace ? favorites.includes(drawerPlace.id) : false} note={drawerPlace ? notes[noteKeyOf(drawerPlace)] : undefined} detailStatus={drawerDetailStatus} onClose={() => setDetailPlace(null)} onFavorite={toggleFavorite} onNavigate={openNavigation} onNoteChange={setPlaceNote}/>
   </main>
 }
 

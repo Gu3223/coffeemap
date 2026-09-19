@@ -1,0 +1,10 @@
+{
+  "name": "amap-place-detail",
+  "version": "1.0.0",
+  "private": true,
+  "description": "高德 POI 详情服务端代理，Key 只存云函数环境变量",
+  "main": "index.js",
+  "engines": {
+    "node": ">=18"
+  }
+}
