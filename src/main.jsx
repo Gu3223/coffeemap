@@ -4,14 +4,19 @@ import { AlertCircle, ArrowUpDown, ChevronDown, Clock3, Coffee, ExternalLink, He
 import { Circle, MapContainer, Marker, Popup, TileLayer, ZoomControl, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { fetchNearbyPlaces, haversineKm } from './amapSearch'
-import { fetchAmapPlaceDetail, hasAmapPoiId, mergeAmapDetail } from './amapDetails'
+import { fetchNearbyPlaces, haversineKm, configureAmapSearch } from './amapSearch'
+import { fetchAmapPlaceDetail, hasAmapPoiId, mergeAmapDetail, configureAmapDetails } from './amapDetails'
 import { NOTE_ATTRIBUTES, isStudyFriendly, noteKeyOf, readNotes, updateNote } from './placeNotes'
 import { curatedEntryFor, curatedScore, isCurated } from './curated'
 import { favoritePlaces, isFavorite, readFavorites, toggleFavorite as toggleFavoriteIn } from './favorites'
 import { clusterPlaces } from './mapClusters'
 import { chainRank, isChainPlace } from './chains'
 import './styles.css'
+
+// 平台注入：环境变量只在这里读一次，交给逻辑层。逻辑层不读 import.meta.env，
+// 因此同一份检索逻辑可以原样搬到小程序（那边入口换成 wx.request 与 wx 存储即可）。
+configureAmapSearch({ key: import.meta.env.VITE_AMAP_KEY || '', proxyUrl: import.meta.env.VITE_AMAP_PROXY || '' })
+configureAmapDetails({ proxyUrl: import.meta.env.VITE_AMAP_DETAIL_PROXY || '' })
 
 const DEFAULT_RADIUS_METERS = 500
 const DEFAULT_CATEGORY = 'cafe'

@@ -1,4 +1,12 @@
-const AMAP_DETAIL_PROXY_URL = import.meta.env.VITE_AMAP_DETAIL_PROXY || ''
+/**
+ * 详情代理地址由平台层注入，理由同 amapSearch：小程序没有 import.meta.env，
+ * 且脱离 Vite 后要能在 Node 里直接跑测试。
+ */
+let detailProxyUrl = ''
+
+export function configureAmapDetails(next = {}) {
+  detailProxyUrl = next.proxyUrl || ''
+}
 const DETAIL_CACHE_TTL_MS = 10 * 60 * 1000
 const POI_ID_PATTERN = /^B0[A-Za-z0-9]{4,30}$/
 const detailCache = new Map()
@@ -58,14 +66,14 @@ export function mergeAmapDetail(place, detail) {
 }
 
 export async function fetchAmapPlaceDetail(amapPoiId, signal) {
-  if (!AMAP_DETAIL_PROXY_URL) throw new Error('DETAIL_PROXY_UNAVAILABLE')
+  if (!detailProxyUrl) throw new Error('DETAIL_PROXY_UNAVAILABLE')
   if (!hasAmapPoiId(amapPoiId)) throw new Error('INVALID_POI_ID')
 
   const cached = detailCache.get(amapPoiId)
   if (cached && Date.now() - cached.timestamp < DETAIL_CACHE_TTL_MS) return cached.detail
 
   const params = new URLSearchParams({ id: amapPoiId })
-  const response = await fetch(`${AMAP_DETAIL_PROXY_URL}?${params}`, { signal })
+  const response = await fetch(`${detailProxyUrl}?${params}`, { signal })
   if (!response.ok) throw new Error('DETAIL_PROXY_UNAVAILABLE')
   const data = await response.json()
   if (data.status !== '1') {

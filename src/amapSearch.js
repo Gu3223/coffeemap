@@ -21,8 +21,20 @@
 import { haversineKm } from './geo.js'
 
 const AMAP_ENDPOINT = 'https://restapi.amap.com/v5/place/around'
-const AMAP_KEY = import.meta.env.VITE_AMAP_KEY || ''
-const AMAP_PROXY_URL = import.meta.env.VITE_AMAP_PROXY || ''
+
+/**
+ * 运行时配置由平台层注入，本模块不直接读 import.meta.env。
+ *
+ * 两个原因：
+ *   1. 小程序没有 import.meta.env，也没有 window；同一份检索逻辑要能直接搬过去；
+ *   2. 脱离 Vite 也能在 Node 里跑测试，不必再替换源码字符串。
+ * main.jsx（网页）与小程序入口各自调用一次 configureAmapSearch 即可。
+ */
+let runtimeConfig = { key: '', proxyUrl: '' }
+
+export function configureAmapSearch(next = {}) {
+  runtimeConfig = { ...runtimeConfig, ...next }
+}
 const AMAP_PAGE_SIZE = 25
 const AMAP_MAX_PAGE = 8
 const AMAP_REQUEST_INTERVAL_MS = 360
@@ -77,9 +89,9 @@ const isRateLimitError = error => RATE_LIMIT_INFOCODES.has(String(error?.infocod
 // 排序、每页条数、返回字段也都在服务端固定。这样端点被他人拿到也只能查咖啡店和按摩店，
 // 无法当作免费的高德通用接口使用。直连模式则照旧把完整参数发给高德。
 function buildRequestUrl(params, category) {
-  if (!AMAP_PROXY_URL) return `${AMAP_ENDPOINT}?${new URLSearchParams(params)}`
+  if (!runtimeConfig.proxyUrl) return `${AMAP_ENDPOINT}?${new URLSearchParams(params)}`
   const proxyParams = { category, location: params.location, radius: params.radius, page_num: params.page_num }
-  return `${AMAP_PROXY_URL}?${new URLSearchParams(proxyParams)}`
+  return `${runtimeConfig.proxyUrl}?${new URLSearchParams(proxyParams)}`
 }
 
 async function requestPage(params, category, signal) {
@@ -88,8 +100,8 @@ async function requestPage(params, category, signal) {
       return await scheduleRequest(async () => {
         const response = await fetch(buildRequestUrl(params, category), { signal })
         if (!response.ok) {
-          const error = new Error(AMAP_PROXY_URL ? 'PROXY_UNAVAILABLE' : `Amap HTTP ${response.status}`)
-          if (AMAP_PROXY_URL) error.code = 'PROXY_UNAVAILABLE'
+          const error = new Error(runtimeConfig.proxyUrl ? 'PROXY_UNAVAILABLE' : `Amap HTTP ${response.status}`)
+          if (runtimeConfig.proxyUrl) error.code = 'PROXY_UNAVAILABLE'
           throw error
         }
         const data = await response.json()
@@ -211,7 +223,7 @@ async function fetchCell(center, radiusMeters, category, config, signal, budget,
     if (budget.remaining <= 0) break
     budget.remaining -= 1
     const params = {
-      key: AMAP_KEY,
+      key: runtimeConfig.key,
       location: `${center.longitude.toFixed(6)},${center.latitude.toFixed(6)}`,
       radius: String(Math.round(radiusMeters)),
       sortrule: 'distance',
@@ -263,7 +275,7 @@ function ringCenters(center, radiusMeters) {
  * 所以界面可以「先出最近的，再逐步补全」，而不是等全部拉完才显示。
  */
 export async function fetchNearbyPlaces(location, signal, radiusMeters, category, onProgress) {
-  if (!AMAP_PROXY_URL && !AMAP_KEY) throw new Error('MISSING_AMAP_KEY')
+  if (!runtimeConfig.proxyUrl && !runtimeConfig.key) throw new Error('MISSING_AMAP_KEY')
   const config = CATEGORY_SEARCH[category] || CATEGORY_SEARCH.cafe
   const collector = createCollector(location, radiusMeters, category, MAX_RESULTS)
   const budget = { remaining: REQUEST_BUDGET }

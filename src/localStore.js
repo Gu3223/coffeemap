@@ -14,7 +14,18 @@ const memoryStorage = {
   removeItem: key => { memoryFallback.delete(key) }
 }
 
+let defaultStorage = memoryStorage
+
+/**
+ * 平台层可替换默认存储。网页保持 localStorage，小程序入口传入 wx 的存储封装即可，
+ * 这样 placeNotes / favorites 一行都不用改。
+ */
+export function setDefaultStorage(storage) {
+  if (storage && typeof storage.getItem === 'function' && typeof storage.setItem === 'function') defaultStorage = storage
+}
+
 export function getStorage() {
+  if (defaultStorage !== memoryStorage) return defaultStorage
   try {
     if (typeof localStorage !== 'undefined') {
       const probe = '__xunyi_probe__'

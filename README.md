@@ -82,6 +82,25 @@
 
 `amapPoiId` / `amapName` / `amapDistrict` 由解析脚本写入，供人工核对；应用只读 `amapPoiId` 与 `name`。
 
+## 平台注入（为小程序迁移准备）
+
+逻辑层不读 `import.meta.env`、不碰 `localStorage`、不依赖 DOM。运行时依赖由平台入口注入一次：
+
+```js
+// src/main.jsx（网页入口）
+configureAmapSearch({ key: import.meta.env.VITE_AMAP_KEY || '', proxyUrl: import.meta.env.VITE_AMAP_PROXY || '' })
+configureAmapDetails({ proxyUrl: import.meta.env.VITE_AMAP_DETAIL_PROXY || '' })
+```
+
+- `configureAmapSearch` / `configureAmapDetails`（`amapSearch.js`、`amapDetails.js`）：金标与代理地址
+- `setDefaultStorage`（`localStore.js`）：替换 `placeNotes` 与 `favorites` 的底层存储
+
+这样做的两个好处：
+1. 同一份检索逻辑可原样搬到小程序，那边入口换成 `wx.request` 与 `wx` 存储封装即可；
+2. 脱离 Vite 也能在 Node 里直接跑真实源码做测试，不必再替换源码字符串。
+
+未注入配置时会明确抛 `MISSING_AMAP_KEY` / `DETAIL_PROXY_UNAVAILABLE`，不会静默失败。
+
 ## 技术栈
 
 - React + Vite
@@ -138,7 +157,7 @@ VITE_AMAP_DETAIL_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-sh
 | --- | --- |
 | 环境 ID | `coffeemap-prod-d7gyys53d1a4cee03` |
 | 应用服务名 | `coffeemap` |
-| 当前线上版本 | `coffeemap-016` |
+| 当前线上版本 | `coffeemap-017` |
 | 构建命令 | `npm run build` |
 | 输出目录 | `dist` |
 | 构建环境变量 | `VITE_AMAP_PROXY`、`VITE_AMAP_DETAIL_PROXY`（高德 Key 已移到云函数，不再进前端包） |
