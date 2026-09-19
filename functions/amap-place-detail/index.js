@@ -12,10 +12,19 @@ const CORS_HEADERS = {
   'content-type': 'application/json; charset=utf-8'
 }
 
+const PLATFORM_EVENT_KEYS = new Set(['headers', 'httpMethod', 'path', 'requestContext', 'body', 'isBase64Encoded', 'queryString', 'queryStringParameters', 'userInfo', 'rawPath', 'rawQueryString'])
+
+/** 同上：HTTP 网关与 wx.cloud.callFunction 的入参形态不同，两种都要认 */
 function readQuery(event) {
   if (event?.queryStringParameters && typeof event.queryStringParameters === 'object') return event.queryStringParameters
   const raw = event?.queryString || (typeof event?.path === 'string' && event.path.includes('?') ? event.path.slice(event.path.indexOf('?') + 1) : '')
-  return Object.fromEntries(new URLSearchParams(raw || ''))
+  if (raw) return Object.fromEntries(new URLSearchParams(raw))
+  const params = {}
+  for (const [name, value] of Object.entries(event || {})) {
+    if (PLATFORM_EVENT_KEYS.has(name)) continue
+    if (typeof value === 'string' || typeof value === 'number') params[name] = String(value)
+  }
+  return params
 }
 
 function reply(statusCode, payload) {

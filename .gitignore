@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# 小程序：Taro 产物与依赖（源码在 miniprogram/src，逻辑层在 shared/）
+miniprogram/dist/
+miniprogram/node_modules/
 .npm-cache/
 .env
 .env.*

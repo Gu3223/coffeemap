@@ -1,0 +1,20 @@
+/* 与网页端同一套配色，单位用 rpx（Taro 按 750 设计稿换算） */
+.page { min-height: 100vh; background: #f4f0ea; display: flex; flex-direction: column; }
+.head { padding: 32rpx 40rpx 16rpx; }
+.brand { font-size: 44rpx; letter-spacing: 8rpx; color: #29251f; }
+.status { display: block; margin-top: 10rpx; font-size: 24rpx; color: #817a70; }
+
+.radii { display: flex; gap: 24rpx; padding: 0 40rpx 20rpx; }
+.radius { font-size: 26rpx; color: #817a70; padding: 8rpx 4rpx; border-bottom: 2rpx solid transparent; }
+.radius.active { color: #b87351; border-bottom-color: #b87351; }
+
+.list { flex: 1; padding: 0 24rpx 40rpx; }
+.card { background: #fff; border: 1rpx solid #ece5db; border-radius: 8rpx; padding: 24rpx; margin-bottom: 20rpx; }
+.card-top { display: flex; justify-content: space-between; align-items: baseline; }
+.name { font-size: 32rpx; color: #29251f; }
+.distance { font-size: 24rpx; color: #817a70; }
+.address { display: block; margin-top: 8rpx; font-size: 24rpx; color: #817a70; }
+.tags { display: flex; gap: 12rpx; margin-top: 16rpx; }
+.tag { font-size: 20rpx; padding: 4rpx 12rpx; border: 1rpx solid #e2d8ca; color: #8a7f70; border-radius: 4rpx; }
+.tag.curated { background: #b87351; border-color: #b87351; color: #fff; }
+.tag.chain { background: #efe9e0; }

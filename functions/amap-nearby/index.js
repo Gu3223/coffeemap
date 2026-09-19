@@ -33,12 +33,28 @@ const CORS_HEADERS = {
   'content-type': 'application/json; charset=utf-8'
 }
 
-/** 兼容不同事件封装：HTTP 访问服务通常给 queryStringParameters，也可能给带 ? 的 path。 */
+/** HTTP 网关会带上的字段，云调用时不存在；解析扁平入参时要排除掉 */
+const PLATFORM_EVENT_KEYS = new Set(['headers', 'httpMethod', 'path', 'requestContext', 'body', 'isBase64Encoded', 'queryString', 'queryStringParameters', 'userInfo', 'rawPath', 'rawQueryString'])
+
+/**
+ * 兼容不同调用方式：
+ *   1. HTTP 访问服务 → queryStringParameters；
+ *   2. 部分封装 → queryString 或带 ? 的 path；
+ *   3. wx.cloud.callFunction → 扁平对象（{ category, location, ... }），Web 端与小程序共用同一个函数。
+ */
 function readQuery(event) {
   if (event && event.queryStringParameters && typeof event.queryStringParameters === 'object') return event.queryStringParameters
   const raw = (event && event.queryString) || (typeof event?.path === 'string' && event.path.includes('?') ? event.path.slice(event.path.indexOf('?') + 1) : '')
+  if (raw) {
+    const params = {}
+    for (const [name, value] of new URLSearchParams(raw)) params[name] = value
+    return params
+  }
   const params = {}
-  for (const [name, value] of new URLSearchParams(raw || '')) params[name] = value
+  for (const [name, value] of Object.entries(event || {})) {
+    if (PLATFORM_EVENT_KEYS.has(name)) continue
+    if (typeof value === 'string' || typeof value === 'number') params[name] = String(value)
+  }
   return params
 }
 

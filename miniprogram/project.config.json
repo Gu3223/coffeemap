@@ -1,0 +1,16 @@
+{
+  "miniprogramRoot": "dist/",
+  "projectname": "banxingbansong",
+  "description": "半醒半松：附近咖啡与按摩",
+  "appid": "wxe7c9c0085e7f7ee8",
+  "setting": {
+    "urlCheck": true,
+    "es6": false,
+    "enhance": false,
+    "postcss": false,
+    "minified": false
+  },
+  "compileType": "miniprogram",
+  "libVersion": "latest",
+  "srcMiniprogramRoot": "dist/"
+}
