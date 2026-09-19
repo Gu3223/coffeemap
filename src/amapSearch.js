@@ -18,6 +18,8 @@
  *     前端不再持有 Key。必须先部署云函数再打开这个开关。
  */
 
+import { haversineKm } from './geo.js'
+
 const AMAP_ENDPOINT = 'https://restapi.amap.com/v5/place/around'
 const AMAP_KEY = import.meta.env.VITE_AMAP_KEY || ''
 const AMAP_PROXY_URL = import.meta.env.VITE_AMAP_PROXY || ''
@@ -39,13 +41,8 @@ const CATEGORY_SEARCH = {
 
 const cellCache = new Map()
 
-export function haversineKm(a, b) {
-  const radians = value => value * Math.PI / 180
-  const dLat = radians(b[0] - a[0]); const dLng = radians(b[1] - a[1])
-  const latA = radians(a[0]); const latB = radians(b[0])
-  const x = Math.sin(dLat / 2) ** 2 + Math.sin(dLng / 2) ** 2 * Math.cos(latA) * Math.cos(latB)
-  return 6371 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
-}
+// 距离计算搬到 ./geo（收藏模块也要用，且那里不该依赖本模块的 import.meta.env）；此处继续对外导出，调用方无需改动
+export { haversineKm }
 
 function sleep(ms, signal) {
   return new Promise((resolve, reject) => {

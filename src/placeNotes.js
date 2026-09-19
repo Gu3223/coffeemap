@@ -7,8 +7,10 @@
  * 把数据同步到 CloudBase（只需要替换本文件的读写实现）。
  *
  * 存储以高德 POI id 为键（比名称稳定），整体存成一个 JSON。
- * 注意：localStorage 是按浏览器隔离的，换设备或清缓存会丢；所以下面提供了导出/导入。
+ * 注意：localStorage 按浏览器隔离，换设备或清缓存会丢（导出/导入还没做）。
  */
+
+import { readJson, writeJson } from './localStore.js'
 
 const STORAGE_KEY = 'xunyi-bei:place-notes:v1'
 
@@ -23,27 +25,6 @@ export const NOTE_ATTRIBUTES = [
 
 const ATTRIBUTE_IDS = NOTE_ATTRIBUTES.map(attribute => attribute.id)
 
-/** 内存兜底必须是模块级单例：每次调用新建 Map 会导致读写不落同一处，标记立刻丢失 */
-const memoryFallback = new Map()
-const memoryStorage = {
-  getItem: key => (memoryFallback.has(key) ? memoryFallback.get(key) : null),
-  setItem: (key, value) => { memoryFallback.set(key, String(value)) },
-  removeItem: key => { memoryFallback.delete(key) }
-}
-
-/** 当前环境的存储实现；拿不到 localStorage（例如隐私模式）时降级为内存，避免整页报错 */
-function getStorage() {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const probe = '__xunyi_probe__'
-      localStorage.setItem(probe, '1')
-      localStorage.removeItem(probe)
-      return localStorage
-    }
-  } catch { /* 隐私模式或配额异常：用内存兜底 */ }
-  return memoryStorage
-}
-
 function sanitizeNote(raw) {
   if (!raw || typeof raw !== 'object') return null
   const verdict = raw.verdict === 'good' || raw.verdict === 'bad' ? raw.verdict : null
@@ -53,28 +34,18 @@ function sanitizeNote(raw) {
   return { verdict, attributes: [...new Set(attributes)], note, updatedAt: Number(raw.updatedAt) || Date.now() }
 }
 
-export function readNotes(storage = getStorage()) {
-  try {
-    const parsed = JSON.parse(storage.getItem(STORAGE_KEY) || '{}')
-    if (!parsed || typeof parsed !== 'object') return {}
-    const notes = {}
-    for (const [key, value] of Object.entries(parsed)) {
-      const note = sanitizeNote(value)
-      if (note) notes[key] = note
-    }
-    return notes
-  } catch {
-    return {}
+export function readNotes(storage) {
+  const parsed = readJson(STORAGE_KEY, {}, storage)
+  const notes = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    const note = sanitizeNote(value)
+    if (note) notes[key] = note
   }
+  return notes
 }
 
-export function writeNotes(notes, storage = getStorage()) {
-  try {
-    storage.setItem(STORAGE_KEY, JSON.stringify(notes))
-    return true
-  } catch {
-    return false
-  }
+export function writeNotes(notes, storage) {
+  return writeJson(STORAGE_KEY, notes, storage)
 }
 
 /** 合并写入某家店的标记；传空的 verdict/attributes/note 表示清除这条标记 */
