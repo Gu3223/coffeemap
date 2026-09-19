@@ -38,9 +38,17 @@ export function sanitizeCuratedEntries(rawEntries) {
 }
 
 /**
- * 按 POI id 精确匹配，失败再按名称匹配。
- * 名称用包含判断，因为高德的门店名常带分店后缀（「申·CAFE(人民广场店)」对「申·CAFE」）。
+ * 名称兜底匹配。
+ *
+ * 只用「归一化后完全相等」，或「门店名以策展名开头」两种情况。
+ *
+ * 为什么不用 includes：实测高德存在归一化后只剩通用词的门店名（如 `COFFEE(恒润广场店)` 归一化成
+ * `coffee`），用子串判断会把「T12 coffee」这类策展名错配上去；短名同样危险，
+ * 「Opia」会命中「UtopiaPortal池」。改成「以策展名开头」后这两种假命中都不会发生，
+ * 而分店后缀的情形（`忍忍咖啡惠吉西路总店`）仍然匹配得到。
  */
+const MIN_CONTAINMENT_LENGTH = 4
+
 export function findCuratedEntry(entries, place) {
   if (!place || !Array.isArray(entries) || !entries.length) return null
   if (place.amapPoiId) {
@@ -49,5 +57,12 @@ export function findCuratedEntry(entries, place) {
   }
   const placeName = normalizePlaceName(place.name)
   if (!placeName) return null
-  return entries.find(entry => entry.normalizedName && (placeName === entry.normalizedName || placeName.includes(entry.normalizedName))) || null
+  const exact = entries.find(entry => entry.normalizedName && placeName === entry.normalizedName)
+  if (exact) return exact
+  return entries.find(entry => {
+    const target = entry.normalizedName
+    if (!target || target.length < MIN_CONTAINMENT_LENGTH) return false
+    // 门店名更长且以策展名开头，视为同一家的分店写法
+    return placeName.length > target.length && placeName.startsWith(target)
+  }) || null
 }
