@@ -6,6 +6,10 @@ miniprogram/node_modules/
 .npm-cache/
 .env
 .env.*
+# 小程序代码上传私钥：拿到即可往小程序上传代码。仓库是公开的，绝不能提交。
+# 正本放在仓库外的 ~/.config/wechat/，这里只是兜底，防止误拷进来。
+*.key
+private.*.key
 !.env.example
 
 # Stray git-internal files that were accidentally committed to the project root
