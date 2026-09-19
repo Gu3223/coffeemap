@@ -54,3 +54,66 @@
 .online-facts dt{font:10px 'DM Mono',monospace;color:var(--muted)}
 .online-facts dd{margin:0;font-size:12px;overflow-wrap:anywhere}
 @media(max-width:800px){.online-facts{grid-template-columns:1fr}}
+
+/* ==========================================================================
+   视觉打磨层（放在最后按需覆盖上面的规则；每条都写了原因，便于日后判断能否删）
+   ========================================================================== */
+
+/* 1) 首屏布局：原来 .workspace 用 calc(100vh - 291px) 硬编码「头部 75 + hero 216」，
+      但 hero 实际渲染约 316px，整页因此多出约 100px 溢出，列表和地图都被折叠线切掉。
+      改用 flex 让工作区自动吃掉剩余高度：不再维护魔法数字，折叠线也正好落对。 */
+@media(min-width:801px){
+  main{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  .header{flex:none}
+  .hero{flex:none}
+  .workspace{flex:1 1 auto;height:auto;min-height:0}
+}
+
+/* 2) Hero 收窄：首屏要看得见门店。品牌感靠字体与留白维持，不靠占满一屏 */
+.hero{padding:30px 4.5vw 26px;background:radial-gradient(circle at 84% 40%,rgba(208,155,56,.10),transparent 20%)}
+.hero h1{font-size:46px;letter-spacing:-1.8px}
+.hero-subtitle{margin-top:14px}
+.hero-orbit{top:34px;width:92px;height:92px}
+.hero-orbit strong{font-size:20px}
+.hero:after{width:210px;height:210px;top:-86px}
+@media(max-width:800px){
+  .hero{padding:26px 20px 22px}
+  .hero h1{font-size:38px}
+  .hero-orbit{top:26px;width:74px;height:74px}
+}
+
+/* 3) 筛选行：原来是 overflow:auto + nowrap，最后一个 chip 被硬切成半截字，看着像坏了。
+      改为换行显示 —— 宁可占两行，也不要出现断字。 */
+.filter-scroll{flex-wrap:wrap;overflow:visible;white-space:normal}
+.toolbar{align-items:flex-start;margin:15px 0 16px}
+.sort{flex:none;margin-top:1px}
+
+/* 4) 卡片密度与可读性：图片(126px)比卡片最小高度(111px)还高，会撑出大片空白；
+      8px 的标签也太小。 */
+.cafe-card{min-height:auto;padding:11px;gap:13px}
+.card-image{width:112px;height:112px}
+.heart{width:26px;height:26px;right:6px;top:6px}
+.card-meta{margin-top:13px;gap:12px;font-size:11px}
+.tags{margin-top:9px;gap:6px}
+.tags span{font-size:10px;padding:4px 7px}
+.open-pill{font-size:10px;padding:3px 7px;background:#8a7f70}
+.no-rating{font-size:11px}
+
+/* 5) 色调统一：绿色定位横幅是页面里唯一的冷色，在米色纸感 + 陶土色的体系里像另一个产品 */
+.location-banner{border-color:#e6dccd;background:#faf6f0;box-shadow:none}
+.location-banner-icon{background:#f0e6da;color:#a9714a}
+.location-banner button{color:#a9714a}
+
+/* 6) 层次统一：同层级元素用一致的圆角与阴影，避免各说各话 */
+.workspace{box-shadow:0 -6px 22px rgba(57,40,22,.04)}
+.cafe-card{border-radius:4px;border-color:#ece5db}
+.cafe-card.selected{border-color:var(--accent);box-shadow:0 6px 18px rgba(196,108,66,.10)}
+.detail-drawer{box-shadow:-16px 0 44px rgba(40,28,18,.16)}
+.my-note-verdict button.active.good{background:#4a7d63;border-color:#4a7d63}
+
+/* 7) 聚合标记：多门店合并成一个圆，显示数量；视觉上比单个标记更沉，表示"这里有一片" */
+.cluster-marker{width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:var(--marker);color:#fff;border:2px solid rgba(255,255,255,.9);box-shadow:0 5px 14px rgba(109,74,56,.4);font:12px 'DM Mono',monospace;transition:.18s}
+.cluster-marker.active{width:54px;height:54px;font-size:13px;border-color:#fff;box-shadow:0 7px 18px rgba(109,74,56,.5)}
+.cluster-marker span{line-height:1}
+/* 加「家」字是为了和单个门店标记（显示评分）区分开：「9」到底是 9 家还是 9.0 分，光看数字分不清 */
+.cluster-marker span small{font-size:8px;margin-left:1px;opacity:.85}

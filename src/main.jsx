@@ -8,6 +8,7 @@ import { fetchNearbyPlaces, haversineKm } from './amapSearch'
 import { fetchAmapPlaceDetail, hasAmapPoiId, mergeAmapDetail } from './amapDetails'
 import { NOTE_ATTRIBUTES, isStudyFriendly, noteKeyOf, readNotes, updateNote } from './placeNotes'
 import { favoritePlaces, isFavorite, readFavorites, toggleFavorite as toggleFavoriteIn } from './favorites'
+import { clusterPlaces } from './mapClusters'
 import './styles.css'
 
 const DEFAULT_RADIUS_METERS = 500
@@ -48,7 +49,7 @@ function PhotoGallery({ photos = [], name }) {
 function CafeCard({ place, selected, favorite, note, onSelect, onFavorite, onNavigate, onDetails }) {
   const status = place.open === true ? '营业中' : place.open === false ? '已打烊' : '营业时间未知'
   const classification = place.studySuitability && place.studySuitability !== '未判断' ? place.studySuitability : place.massageProfile
-  return <article className={`cafe-card ${selected ? 'selected' : ''}`} onClick={() => { onSelect(place.id); onDetails(place) }}><div className="card-image">{place.image ? <img src={place.image} alt=""/> : <div className="image-placeholder"><Coffee size={27}/></div>}<button className={`heart ${favorite ? 'liked' : ''}`} onClick={event => { event.stopPropagation(); onFavorite(place) }} aria-label="收藏"><Heart size={16} fill={favorite ? 'currentColor' : 'none'}/></button><span className={`open-pill ${place.open === false ? 'closed' : place.open == null ? 'unknown' : ''}`}>{status}</span></div><div className="card-copy"><div className="card-top"><div><h3>{place.name}</h3><p>{place.address}</p></div><div className="rating"><Rating value={place.rating}/></div></div><div className="card-meta"><span><Navigation size={13}/>{place.distanceKm.toFixed(1)} km</span><span><Coffee size={13}/>{place.category}</span>{place.priceLabel && <span className="price-meta">{place.priceLabel}</span>}</div><div className="tags">{note && <span className="tag-mine">{isStudyFriendly(note) ? '我标记：适合学习' : note.verdict === 'bad' ? '我标记：不适合' : '我有备注'}</span>}{[...place.tags, classification].filter(Boolean).map(tag => <span key={tag}>{tag}</span>)}</div><div className="card-actions"><button className="details-button" onClick={event => { event.stopPropagation(); onDetails(place) }}>查看详情 <ExternalLink size={13}/></button><button className="nav-button" onClick={event => { event.stopPropagation(); onNavigate(place) }}><Navigation size={13}/>导航</button></div></div></article>
+  return <article className={`cafe-card ${selected ? 'selected' : ''}`} onClick={() => { onSelect(place.id); onDetails(place) }}><div className="card-image">{place.image ? <img src={place.image} alt=""/> : <div className="image-placeholder"><Coffee size={27}/></div>}<button className={`heart ${favorite ? 'liked' : ''}`} onClick={event => { event.stopPropagation(); onFavorite(place) }} aria-label="收藏"><Heart size={16} fill={favorite ? 'currentColor' : 'none'}/></button><span className={`open-pill ${place.open === false ? 'closed' : place.open == null ? 'unknown' : ''}`}>{status}</span></div><div className="card-copy"><div className="card-top"><div><h3>{place.name}</h3><p>{place.address}</p></div><div className="rating"><Rating value={place.rating}/></div></div><div className="card-meta"><span><Navigation size={13}/>{place.distanceKm.toFixed(1)} km</span>{place.priceLabel && <span className="price-meta">{place.priceLabel}</span>}</div><div className="tags">{note && <span className="tag-mine">{isStudyFriendly(note) ? '我标记：适合学习' : note.verdict === 'bad' ? '我标记：不适合' : '我有备注'}</span>}{[...place.tags, classification].filter(Boolean).slice(0, 3).map(tag => <span key={tag}>{tag}</span>)}</div><div className="card-actions"><button className="details-button" onClick={event => { event.stopPropagation(); onDetails(place) }}>查看详情 <ExternalLink size={13}/></button><button className="nav-button" onClick={event => { event.stopPropagation(); onNavigate(place) }}><Navigation size={13}/>导航</button></div></div></article>
 }
 
 // 「我的标记」：高德不提供「适合学习」这类字段，这是唯一真实可信的来源。
@@ -121,10 +122,38 @@ function CafeDetailDrawer({ place, favorite, note, detailStatus, onClose, onFavo
 function Recenter({ center, onLocate }) { const map = useMap(); useEffect(() => { map.flyTo(center, 14, { duration: .7 }) }, [center, map]); return <button className="recenter" title="回到当前位置" onClick={() => { map.flyTo(center, 14); onLocate?.() }}><LocateFixed size={16}/></button> }
 function markerIcon(place, active) { return L.divIcon({ className: 'custom-marker-wrap', html: `<div class="custom-marker ${active ? 'active' : ''}" style="--marker:${place.color}"><span>${place.rating == null ? '•' : place.rating}</span></div>`, iconSize: [active ? 48 : 39, active ? 48 : 39], iconAnchor: [active ? 24 : 19, active ? 46 : 37], popupAnchor: [0, -38] }) }
 
-function MapView({ places, selected, onSelect, location, accuracy, onLocate }) {
-  const center = location ? [location.latitude, location.longitude] : [0, 0]
+// 地图标记聚合图标：显示「这一格里有几家」，放大后会自动散开成单个门店标记
+function clusterIcon(cluster, active) {
+  const size = active ? 54 : 46
+  return L.divIcon({
+    className: 'custom-marker-wrap',
+    html: `<div class="cluster-marker ${active ? 'active' : ''}" style="--marker:${cluster.place.color}"><span>${cluster.count}<small>家</small></span></div>`,
+    iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2]
+  })
+}
+
+function PlaceMarkers({ places, selected, onSelect }) {
+  const map = useMap()
+  const [zoom, setZoom] = useState(() => map.getZoom())
+  useEffect(() => {
+    const syncZoom = () => setZoom(map.getZoom())
+    map.on('zoomend', syncZoom)
+    return () => map.off('zoomend', syncZoom)
+  }, [map])
+  const clusters = useMemo(() => clusterPlaces(places, zoom).map(cluster => {
+    // 列表里选中的那家若在聚合内但不是代表项，就把代表项换成它，否则地图上看不到高亮
+    const selectedMember = cluster.places.find(place => place.id === selected)
+    return selectedMember ? { ...cluster, place: selectedMember } : cluster
+  }), [places, zoom, selected])
+
+  return clusters.map(cluster => cluster.count > 1
+    ? <Marker key={cluster.key} position={cluster.center} icon={clusterIcon(cluster, cluster.place.id === selected)} eventHandlers={{ click: () => onSelect(cluster.place.id) }}><Popup><strong>{cluster.place.name}</strong><br/><span>这附近共 {cluster.count} 家，放大可分开显示</span><br/><a className="popup-nav" href={buildAmapNavigationUrl(cluster.place)} target="_blank" rel="noreferrer">打开高德导航 →</a></Popup></Marker>
+    : <Marker key={cluster.key} position={cluster.place.position} icon={markerIcon(cluster.place, cluster.place.id === selected)} eventHandlers={{ click: () => onSelect(cluster.place.id) }}><Popup><strong>{cluster.place.name}</strong><br/><span>{cluster.place.rating == null ? '暂无评分' : `★ ${cluster.place.rating}`} · {cluster.place.distanceKm.toFixed(1)} km</span><br/><a className="popup-nav" href={buildAmapNavigationUrl(cluster.place)} target="_blank" rel="noreferrer">打开高德导航 →</a></Popup></Marker>)
+}
+
+function MapView({ places, selected, onSelect, location, accuracy, onLocate }) {  const center = location ? [location.latitude, location.longitude] : [0, 0]
   if (!location) return <div className="map-wrap real-map map-placeholder"><div><LocateFixed size={28}/><strong>开启定位后显示附近地图</strong><span>未获取真实位置，不会请求其他区域</span><button onClick={onLocate}>使用当前位置</button></div></div>
-  return <div className="map-wrap real-map"><MapContainer center={center} zoom={14} zoomControl={false} scrollWheelZoom className="leaflet-map"><TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/><ZoomControl position="topright"/><Recenter center={center} onLocate={onLocate}/><Circle center={center} radius={accuracy || 40} pathOptions={{ color: '#5d90a4', fillColor: '#8bb6c5', fillOpacity: .12, weight: 1 }}/><Marker position={center} icon={L.divIcon({ className: 'user-location-wrap', html: '<div class="user-location-dot"></div>', iconSize: [18,18], iconAnchor: [9,9] })}/>{places.map(place => <Marker key={place.id} position={place.position} icon={markerIcon(place, selected === place.id)} eventHandlers={{ click: () => onSelect(place.id) }}><Popup><strong>{place.name}</strong><br/><span>{place.rating == null ? '暂无评分' : `★ ${place.rating}`} · {place.distanceKm.toFixed(1)} km</span><br/><a className="popup-nav" href={buildAmapNavigationUrl(place)} target="_blank" rel="noreferrer">打开高德导航 →</a></Popup></Marker>)}</MapContainer><div className="map-caption"><MapPin size={15}/> {location.label || '当前位置'} <span>·</span> {places.length} places nearby</div></div>
+  return <div className="map-wrap real-map"><MapContainer center={center} zoom={14} zoomControl={false} scrollWheelZoom className="leaflet-map"><TileLayer attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"/><ZoomControl position="topright"/><Recenter center={center} onLocate={onLocate}/><Circle center={center} radius={accuracy || 40} pathOptions={{ color: '#5d90a4', fillColor: '#8bb6c5', fillOpacity: .12, weight: 1 }}/><Marker position={center} icon={L.divIcon({ className: 'user-location-wrap', html: '<div class="user-location-dot"></div>', iconSize: [18,18], iconAnchor: [9,9] })}/><PlaceMarkers places={places} selected={selected} onSelect={onSelect}/></MapContainer><div className="map-caption"><MapPin size={15}/> {location.label || '当前位置'} <span>·</span> {places.length} places nearby</div></div>
 }
 
 function App() {
