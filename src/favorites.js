@@ -38,7 +38,7 @@ function snapshot(place) {
     tel: place.tel || null,
     businessArea: place.businessArea || null,
     alias: place.alias || null,
-    color: place.color || '#c46c42',
+    color: place.color || '#b87351',
     source: place.source || 'amap',
     savedAt: Date.now()
   }

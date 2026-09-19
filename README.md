@@ -1,6 +1,6 @@
-# 寻一杯（coffeemap）
+# 半醒半松（coffeemap）
 
-“寻一杯”是一个基于 React、Vite、高德地点数据和 Leaflet 地图的附近地点探索网页，帮助用户在真实当前位置附近寻找咖啡店和按摩店，并查看评分、图片、价格、标签和导航入口。
+“半醒半松”是一个基于 React、Vite、高德地点数据和 Leaflet 地图的附近地点探索网页，帮助用户在真实当前位置附近寻找咖啡店和按摩店，并查看评分、图片、价格、标签和导航入口。名字对应两个分类：**醒**是咖啡，**松**是按摩；两个分类的切换按钮就叫「醒」和「松」，圆形标志是「半」。
 
 ## 项目地址
 
@@ -41,6 +41,7 @@
 - Lucide React
 - 高德地图 Web 服务地点搜索 API
 - CloudBase Web 应用部署
+- 字体：中文标题 **思源宋体**（Noto Serif SC），拉丁大字 **Bodoni Moda**（Didone 高对比），正文与店名 **Inter**（中文回退系统雅黑），数字与标签 DM Mono。字体经 `styles.css` 顶部的 Google Fonts `@import` 引入，中文按 unicode-range 切片按需下载
 
 ## 本地运行
 
@@ -87,7 +88,7 @@ VITE_AMAP_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.
 | --- | --- |
 | 环境 ID | `coffeemap-prod-d7gyys53d1a4cee03` |
 | 应用服务名 | `coffeemap` |
-| 当前线上版本 | `coffeemap-006` |
+| 当前线上版本 | `coffeemap-012` |
 | 构建命令 | `npm run build` |
 | 输出目录 | `dist` |
 | 构建环境变量 | `VITE_AMAP_PROXY`（高德 Key 已移到云函数，不再进前端包） |
@@ -146,7 +147,7 @@ git show 提交号
 
 如果新建对话，可以直接发送：
 
-> 继续开发“寻一杯”项目。GitHub 仓库是 https://github.com/Gu3223/coffeemap ，线上地址是 https://coffeemap-coffeemap-prod-d7gyys53d1a4cee03.webapps.tcloudbase.com/ 。请基于 `main` 分支最新代码修改，完成后同步 GitHub，并部署 CloudBase。
+> 继续开发“半醒半松”项目。GitHub 仓库是 https://github.com/Gu3223/coffeemap ，线上地址是 https://coffeemap-coffeemap-prod-d7gyys53d1a4cee03.webapps.tcloudbase.com/ 。请基于 `main` 分支最新代码修改，完成后同步 GitHub，并部署 CloudBase。
 
 ## 重要说明
 
