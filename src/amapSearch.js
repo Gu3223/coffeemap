@@ -106,7 +106,7 @@ async function requestPage(params, category, signal) {
   }
 }
 
-function colorFor(index) { return ['#c46c42', '#d09b38', '#8d6b55', '#a36b4c', '#70806a'][index % 5] }
+function colorFor(index) { return ['#b87351', '#c2a05a', '#8d7867', '#a07b62', '#79806f'][index % 5] }
 
 function priceInfo(value, category) {
   const numeric = Number(value)
