@@ -3,12 +3,15 @@
  */
 
 const PATH_PREFIX = '/api/amap-js'
+const SERVICE_PREFIX = `${PATH_PREFIX}/_AMapService`
 const ALLOWED_PATH = /^\/v[345]\/[A-Za-z0-9_./-]+$/
 
 function requestPath(event = {}) {
   const raw = String(event.rawPath || event.path || event.requestContext?.path || '')
-  const marker = raw.indexOf(PATH_PREFIX)
-  return marker >= 0 ? raw.slice(marker + PATH_PREFIX.length) || '/' : raw
+  const marker = raw.indexOf(SERVICE_PREFIX)
+  if (marker >= 0) return raw.slice(marker + SERVICE_PREFIX.length) || '/'
+  const serviceMarker = raw.indexOf('/_AMapService')
+  return serviceMarker >= 0 ? raw.slice(serviceMarker + '/_AMapService'.length) || '/' : raw
 }
 
 function requestQuery(event = {}) {
@@ -56,7 +59,11 @@ exports.main = async (event = {}) => {
   const params = requestQuery(event)
   params.delete('jscode')
   params.set('jscode', securityCode)
-  const upstream = path.startsWith('/v4/map/styles') ? 'https://webapi.amap.com' : 'https://restapi.amap.com'
+  const upstream = path.startsWith('/v4/map/styles')
+    ? 'https://webapi.amap.com'
+    : path.startsWith('/v3/vectormap')
+      ? 'https://fmap01.amap.com'
+      : 'https://restapi.amap.com'
 
   try {
     const response = await fetch(`${upstream}${path}?${params}`, { signal: AbortSignal.timeout(15000) })

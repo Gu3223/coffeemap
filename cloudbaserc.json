@@ -13,7 +13,7 @@
       "VITE_AMAP_PROXY": "https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/nearby",
       "VITE_AMAP_DETAIL_PROXY": "https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/place-detail",
       "VITE_AMAP_JS_KEY": "{{env.VITE_AMAP_JS_KEY}}",
-      "VITE_AMAP_JS_SERVICE_HOST": "https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/amap-js"
+      "VITE_AMAP_JS_SERVICE_HOST": "https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/amap-js/_AMapService"
     }
   },
   "functions": [

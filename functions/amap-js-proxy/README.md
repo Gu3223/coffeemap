@@ -1,7 +1,7 @@
 # 高德 JS API 安全代理
 
-将 HTTP 网关前缀 `/api/amap-js/*` 指向本函数，并开启“路径透传”。前端把该地址配置为
-`VITE_AMAP_JS_SERVICE_HOST`。函数只接受高德 `v3`、`v4`、`v5` 路径，固定转发到高德官方域名，
+将 HTTP 网关前缀 `/api/amap-js/*` 指向本函数，并开启“路径透传”。前端把
+`https://你的域名/api/amap-js/_AMapService` 配置为 `VITE_AMAP_JS_SERVICE_HOST`；`_AMapService` 是高德规定的固定前缀。函数只接受高德 `v3`、`v4`、`v5` 路径，固定转发到高德官方域名，
 并在服务端添加 `AMAP_JS_SECURITY_CODE`。
 
 环境变量：

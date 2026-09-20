@@ -145,7 +145,7 @@ VITE_AMAP_KEY=你的高德Web服务Key
 VITE_AMAP_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/nearby
 VITE_AMAP_DETAIL_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/place-detail
 VITE_AMAP_JS_KEY=你的高德Web端（JS API）Key
-VITE_AMAP_JS_SERVICE_HOST=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/amap-js
+VITE_AMAP_JS_SERVICE_HOST=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/amap-js/_AMapService
 AMAP_JS_SECURITY_CODE=JS API Key配套安全密钥
 ```
 
@@ -196,7 +196,7 @@ npm run deploy:fn
 npm run deploy:fn:all
 ```
 
-`amap-js-proxy` 的 HTTP 网关触发前缀为 `/api/amap-js`。在 CloudBase 控制台确认该路由开启“路径透传”，使 `/api/amap-js/v3/...` 等子路径仍能到达同一个函数。代理只接受高德 `v3`、`v4`、`v5` 路径，并固定转发到高德官方域名。
+`amap-js-proxy` 的 HTTP 网关触发前缀为 `/api/amap-js`。在 CloudBase 控制台确认该路由开启“路径透传”，使 `/api/amap-js/_AMapService/v3/...` 等子路径仍能到达同一个函数；`_AMapService` 是高德 JS API 规定的固定前缀。代理只接受高德 `v3`、`v4`、`v5` 路径，并固定转发到高德官方域名。
 
 部署配置位于 [`cloudbaserc.json`](./cloudbaserc.json)：`app` 段声明 Web 应用的构建环境变量，`functions` 段声明附近搜索、地点详情和高德 JS 安全代理三个云函数；所有密钥都只引用部署环境变量，不写入仓库。它不会上传本地 `.env` 文件。
 
