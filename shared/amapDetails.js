@@ -91,7 +91,7 @@ export async function fetchAmapPlaceDetail(amapPoiId, signal) {
     throw error
   }
 
-  const poi = (data.pois || []).find(item => item.id === amapPoiId) || data.pois?.[0]
+  const poi = (data.pois || []).find(item => item.id === amapPoiId)
   if (!poi) throw new Error('DETAIL_NOT_FOUND')
   const detail = normalizeDetail(poi)
   detailCache.set(amapPoiId, { timestamp: Date.now(), detail })

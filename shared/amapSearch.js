@@ -172,7 +172,14 @@ function createCollector(origin, radiusMeters, category, maxResults) {
   let index = 0
 
   const mergeInto = (target, place) => {
-    Object.assign(target, { ...target, ...place, id: target.id, amapPoiId: target.amapPoiId })
+    for (const [key, value] of Object.entries(place)) {
+      if (key === 'id' || key === 'amapPoiId') continue
+      if (Array.isArray(value)) {
+        target[key] = [...new Set([...(target[key] || []), ...value])]
+      } else if (value != null && value !== '') {
+        target[key] = value
+      }
+    }
   }
 
   const findNearDuplicate = place => {
@@ -229,6 +236,7 @@ async function fetchCell(center, radiusMeters, category, config, signal, budget,
 
   const pois = []
   let saturated = false
+  let complete = false
   for (let page = 1; page <= AMAP_MAX_PAGE; page += 1) {
     if (budget.remaining <= 0) break
     budget.remaining -= 1
@@ -256,14 +264,13 @@ async function fetchCell(center, radiusMeters, category, config, signal, budget,
     const results = data.pois || []
     pois.push(...results)
     onChunk(results)
-    if (results.length < AMAP_PAGE_SIZE) break
-    if (page === AMAP_MAX_PAGE) saturated = true
+    if (results.length < AMAP_PAGE_SIZE) { complete = true; break }
+    if (page === AMAP_MAX_PAGE) { saturated = true; complete = true }
   }
 
-  // 只要抓到过内容就缓存，包含「撞上单次 200 条上限」和「请求预算耗尽」这两种截断。
-  // POI 是静态数据，复用同一片比每次重耗 40 次配额 + 15 秒等待划算得多；
-  // saturated 必须一起存，否则缓存命中后会误判「这片已翻完」而跳过环形补全。
-  if (pois.length) cellCache.set(cacheKey, { timestamp: Date.now(), pois, saturated })
+  // 只缓存正常翻完或达到分页上限的结果；失败、预算耗尽时允许下次重新补全。
+  // 保存 saturated，使缓存命中后仍能触发环形补全。
+  if (complete && pois.length) cellCache.set(cacheKey, { timestamp: Date.now(), pois, saturated })
   return { saturated }
 }
 
