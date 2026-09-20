@@ -13,7 +13,9 @@
 - 页面打开后自动请求浏览器真实位置
 - 未获得位置时不请求其他区域的数据
 - 默认只查询当前位置 500 米内，可切换 500 米、1 公里、2 公里和 5 公里
-- 使用高精度定位，并显示定位误差提示
+- 配置高德 JS API 后，定位点、地图底图与门店 POI 全部统一为 GCJ-02：页面会在最多 8 秒内选择精度更好的定位结果，显示定位来源与误差，并支持实时跟随
+- 高德 JS API 尚未配置时自动保留原 Leaflet 地图和浏览器定位，不会因为缺少新凭据让线上页面不可用
+- 高德地图支持点击选点和拖动图钉；用户确认后才以新位置重新搜索，避免误触消耗接口配额
 - 咖啡店搜索使用高德 POI 分类「咖啡厅」（typecode `050500`）按类别精确检索，不再按名称关键词匹配，因此星巴克、M Stand 这类名称里不含「咖啡」的门店也能搜到；关键词仅在分类检索返回空时作为兜底
 - 点击任意门店卡片即可打开详情抽屉，抽屉里可翻看高德返回的全部门店图片（2 公里样本里 325/369 家有图，其中 303 家是多图）
 - 打开抽屉时额外补拉一次高德 POI 详情（服务端代理 `/api/place-detail`，只接受真实 POI id）。实测收益：**约六成门店能补上「今日营业时间」**；电话与图片基本补不到（8 家样本里电话 0 家、图片 0 家增益），拿不到就不显示，抽屉保留基础信息且不会报错
@@ -28,6 +30,7 @@
 - 高德限制单个圆形区域最多返回 200 条（官方原文「同请求参数翻页查询最多支持获取200条数据」），触及上限时自动改用「中心 + 6 片环形分片」继续检索：2 公里实测 369 家，单圆只有 191 家
 - 配额提醒：高德基础搜索服务（含周边搜索）个人认证开发者 **5,000 次/月、QPS 3**，日配额已于 2025-05-20 取消。一次 500 米搜索约 2 次请求，一次 2 公里搜索最多 32 次请求；分片结果缓存 10 分钟，重复搜索不再消耗配额
 - 结果默认按距离从近到远排序，也可以切换为评分优先
+- 首页提供“离你最近 / 高分有图 / 口碑推荐”三个去重精选位；卡片会把真实字段组合为步行时间、评分、图片数量和价格摘要，不生成或补写不存在的门店信息
 - 仅保留咖啡和按摩两个分类，已移除网吧分类
 - 显示高德评分、评价数量、图片、营业信息、价格和地址；高德偶尔返回 0.4 这类极低评分，低于 2 分时显示「评分较少」而不是渲染成 0 颗星
 - 咖啡店提供“适合学习 / 不建议学习 / 未判断”参考标签
@@ -141,10 +144,15 @@ npm run preview
 VITE_AMAP_KEY=你的高德Web服务Key
 VITE_AMAP_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/nearby
 VITE_AMAP_DETAIL_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/place-detail
+VITE_AMAP_JS_KEY=你的高德Web端（JS API）Key
+VITE_AMAP_JS_SERVICE_HOST=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/amap-js
+AMAP_JS_SECURITY_CODE=JS API Key配套安全密钥
 ```
 
 - 部署云函数时，`cloudbaserc.json` 通过 `{{env.VITE_AMAP_KEY}}` 把它注入函数环境变量（文件里不写明文，因为它会被提交进 Git）；
 - `VITE_AMAP_PROXY` 是附近搜索的代理，`VITE_AMAP_DETAIL_PROXY` 是门店详情的代理。两个云函数共用同一把服务端 Key；
+- `VITE_AMAP_JS_KEY` 是另一种平台类型的 Key，必须在高德控制台选择“Web 端（JS API）”并绑定正式站点域名，不能直接拿 Web 服务 Key 代替；
+- `AMAP_JS_SECURITY_CODE` 只注入 `amap-js-proxy` 云函数。前端通过 `VITE_AMAP_JS_SERVICE_HOST` 使用它，不会把安全密钥打进网页包；
 - 想把前端临时切回「直连高德」的老模式，注释掉 `VITE_AMAP_PROXY` 那一行即可（详情增强会自动降级，抽屉只显示基础信息）。
 
 `.env` 已被 Git 忽略，真实 Key 不应写进 GitHub。两个云函数的完整说明见 [`functions/amap-nearby/README.md`](./functions/amap-nearby/README.md)。
@@ -157,11 +165,11 @@ VITE_AMAP_DETAIL_PROXY=https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-sh
 | --- | --- |
 | 环境 ID | `coffeemap-prod-d7gyys53d1a4cee03` |
 | 应用服务名 | `coffeemap` |
-| 当前线上版本 | `coffeemap-017` |
+| 最近一次已知线上版本 | `coffeemap-020`（本轮改动部署后以控制台为准） |
 | 构建命令 | `npm run build` |
 | 输出目录 | `dist` |
-| 构建环境变量 | `VITE_AMAP_PROXY`、`VITE_AMAP_DETAIL_PROXY`（高德 Key 已移到云函数，不再进前端包） |
-| 云函数 | `amap-nearby`（路由 `/api/nearby`）、`amap-place-detail`（路由 `/api/place-detail`） |
+| 构建环境变量 | `VITE_AMAP_PROXY`、`VITE_AMAP_DETAIL_PROXY`、`VITE_AMAP_JS_KEY`、`VITE_AMAP_JS_SERVICE_HOST` |
+| 云函数 | `amap-nearby`、`amap-place-detail`、`amap-js-proxy` |
 
 首次使用时登录并切换环境：
 
@@ -176,13 +184,21 @@ tcb env use coffeemap-prod-d7gyys53d1a4cee03
 npm run deploy:cloudbase
 ```
 
-改动了 `functions/` 之后，还要部署云函数（会自动创建/更新网关路由）：
+改动了原有数据函数后，可以只部署附近搜索与详情函数：
 
 ```bash
 npm run deploy:fn
 ```
 
-部署配置位于 [`cloudbaserc.json`](./cloudbaserc.json)：`app` 段声明 Web 应用的构建环境变量，`functions` 段声明两个云函数 `amap-nearby` 与 `amap-place-detail`（Key 都以 `{{env.VITE_AMAP_KEY}}` 引用，不写明文）。它不会上传本地 `.env` 文件。
+配置高德 JS Key 与安全密钥后，再部署包括地图代理在内的全部函数：
+
+```bash
+npm run deploy:fn:all
+```
+
+`amap-js-proxy` 的 HTTP 网关触发前缀为 `/api/amap-js`。在 CloudBase 控制台确认该路由开启“路径透传”，使 `/api/amap-js/v3/...` 等子路径仍能到达同一个函数。代理只接受高德 `v3`、`v4`、`v5` 路径，并固定转发到高德官方域名。
+
+部署配置位于 [`cloudbaserc.json`](./cloudbaserc.json)：`app` 段声明 Web 应用的构建环境变量，`functions` 段声明附近搜索、地点详情和高德 JS 安全代理三个云函数；所有密钥都只引用部署环境变量，不写入仓库。它不会上传本地 `.env` 文件。
 
 ## GitHub 同步
 

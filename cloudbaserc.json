@@ -11,7 +11,9 @@
     "deployPath": "/",
     "envVariables": {
       "VITE_AMAP_PROXY": "https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/nearby",
-      "VITE_AMAP_DETAIL_PROXY": "https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/place-detail"
+      "VITE_AMAP_DETAIL_PROXY": "https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/place-detail",
+      "VITE_AMAP_JS_KEY": "{{env.VITE_AMAP_JS_KEY}}",
+      "VITE_AMAP_JS_SERVICE_HOST": "https://coffeemap-prod-d7gyys53d1a4cee03-1491257715.ap-shanghai.app.tcloudbase.com/api/amap-js"
     }
   },
   "functions": [
@@ -29,6 +31,15 @@
       "timeout": 20,
       "envVariables": {
         "AMAP_KEY": "{{env.VITE_AMAP_KEY}}"
+      }
+    },
+    {
+      "name": "amap-js-proxy",
+      "description": "高德 JS API 安全密钥受限代理",
+      "timeout": 20,
+      "envVariables": {
+        "AMAP_JS_SECURITY_CODE": "{{env.AMAP_JS_SECURITY_CODE}}",
+        "ALLOWED_ORIGINS": "https://coffeemap-coffeemap-prod-d7gyys53d1a4cee03.webapps.tcloudbase.com,http://localhost:5173"
       }
     }
   ]

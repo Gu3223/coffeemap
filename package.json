@@ -3,7 +3,26 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "scripts": { "dev": "vite", "build": "vite build", "preview": "vite preview", "deploy:cloudbase": "tcb app deploy coffeemap --env-id coffeemap-prod-d7gyys53d1a4cee03 --enable-git-ignore --force", "deploy:fn:nearby": "tcb fn deploy amap-nearby --env-id coffeemap-prod-d7gyys53d1a4cee03 --dir functions/amap-nearby --path /api/nearby --runtime Nodejs20.19 --force", "deploy:fn:detail": "tcb fn deploy amap-place-detail --env-id coffeemap-prod-d7gyys53d1a4cee03 --dir functions/amap-place-detail --path /api/place-detail --runtime Nodejs20.19 --force", "deploy:fn": "npm run deploy:fn:nearby && npm run deploy:fn:detail" },
-  "dependencies": { "@vitejs/plugin-react": "latest", "vite": "latest", "react": "latest", "react-dom": "latest", "lucide-react": "^0.468.0", "leaflet": "^1.9.4", "react-leaflet": "^5.0.0" },
-  "devDependencies": {}
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test --test-isolation=none tests/*.test.js",
+    "deploy:cloudbase": "tcb app deploy coffeemap --env-id coffeemap-prod-d7gyys53d1a4cee03 --enable-git-ignore --force",
+    "deploy:fn:nearby": "tcb fn deploy amap-nearby --env-id coffeemap-prod-d7gyys53d1a4cee03 --dir functions/amap-nearby --path /api/nearby --runtime Nodejs20.19 --force",
+    "deploy:fn:detail": "tcb fn deploy amap-place-detail --env-id coffeemap-prod-d7gyys53d1a4cee03 --dir functions/amap-place-detail --path /api/place-detail --runtime Nodejs20.19 --force",
+    "deploy:fn:js-proxy": "tcb fn deploy amap-js-proxy --env-id coffeemap-prod-d7gyys53d1a4cee03 --dir functions/amap-js-proxy --path /api/amap-js --runtime Nodejs20.19 --force",
+    "deploy:fn": "npm run deploy:fn:nearby && npm run deploy:fn:detail",
+    "deploy:fn:all": "npm run deploy:fn && npm run deploy:fn:js-proxy"
+  },
+  "dependencies": {
+    "@amap/amap-jsapi-loader": "^1.0.1",
+    "@vitejs/plugin-react": "latest",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^0.468.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "react-leaflet": "^5.0.0",
+    "vite": "latest"
+  }
 }
